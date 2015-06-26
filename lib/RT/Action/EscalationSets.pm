@@ -146,6 +146,8 @@ sub Commit {
     my $defaultLvl = RT->Config->Get('DefaultEscalationValue');
     my %principals = RT->Config->Get('EscalationPrincipals');
     my %esets = RT->Config->Get('EscalationSets');
+    my $writeComment = RT->Config->Get('WriteCommentOnEscalation');
+    my $timezone = RT->Config->Get('Timezone');
 
     # Ticket fields
     my $ticket = $self->TicketObj;
@@ -187,7 +189,9 @@ sub Commit {
         return 0;
     }
     
+    $date->config('setdate', 'zone,UTC');
     $date->parse($created);
+    $date->convert($timezone);
 
     # nowDelta = now - created
     my $nowDelta = $now->calc($date, 1);
@@ -201,13 +205,15 @@ sub Commit {
             $RT::Logger->error("Config: Cannot parse escalation time value '" . $eset->{$_} . "' in " . $escalationSet . '->' . $_);
             return 0;
         }
+        $x->cmp($nowDelta); # Kostyli
+        $nowDelta->cmp($x); # Kostyli, see below
         $deltas{$_} = $x;
     }
 
     # Determine whether its time to change escalation level CF
     my $newLvl = undef;
     for (sort { $b <=> $a; } keys %deltas) {
-        if ($deltas{$_}->cmp($nowDelta) < 0) {
+        if ($deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'}) { # Kostyli, cmp() not properly works
             $newLvl = $_;
             last;
         }
@@ -220,6 +226,36 @@ sub Commit {
         }
         $RT::Logger->info("Ticket #" . $ticket->id . ': CF.' . $cfLvl . " changed " . $lvl . ' -> ' . $newLvl);
 
+
+        my %tplArgs = (
+            'Ticket' => $ticket,
+            'EscalationLevel' => $newLvl,
+            'CreatedTimeAgo' => $nowDelta->printf("%0hv:%0mv"),
+        );
+
+        # Write comment if there is allowed in config
+        if ($writeComment) {
+            my $ctpl = RT::Template->new($self->CurrentUser );
+            my $res = $ctpl->LoadGlobalTemplate('Escalation_Comment');
+            unless ($res) {
+                $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation_Comment');
+                return 0;
+            }
+            my ($val, $msg) = $ctpl->Parse( %tplArgs );
+            unless ($val) {
+                $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation_Comment template: ' . $msg);
+            }
+            my ($trid, $trmsg, $trobj) = $ticket->Comment(
+                MIMEObj => $ctpl->MIMEObj,
+                TimeTaken => 0,
+            );
+            unless ($trid) {
+                $RT::Logger->error("Ticket #" . $ticket->id . ': error while write comment: ' . $trmsg);
+                return 0;
+            }
+            $RT::Logger->info("Ticket #" . $ticket->id . ': comment successfully wrote');
+        }
+
         # Set email notification parameters
         my $pcps = $principals{$newLvl};
         if ($pcps) {
@@ -227,11 +263,7 @@ sub Commit {
 
             my $res = RT::Interface::Email::SendEmailUsingTemplate(
                 'Template' => 'Escalation',
-                'Arguments' => {
-                    'Ticket' => $ticket,
-                    'EscalationLevel' => $newLvl,
-                    'CreatedTimeAgo' => $nowDelta->printf("%0hv:%0mv"),
-                },
+                'Arguments' => \%tplArgs,
                 'To' => join(',', @{$self->{'Emails'}}),
                 'ExtraHeaders' => {'Content-Type' => "text/html; charset=\"UTF-8\""}
             );
