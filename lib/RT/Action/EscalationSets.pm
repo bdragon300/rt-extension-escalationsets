@@ -147,6 +147,7 @@ sub Commit {
     my %principals = RT->Config->Get('EscalationPrincipals');
     my %esets = RT->Config->Get('EscalationSets');
     my $writeComment = RT->Config->Get('WriteCommentOnEscalation');
+    my $emailFrom = RT->Config->Get("EscalationEmailFrom");
     my $timezone = RT->Config->Get('Timezone');
 
     # Ticket fields
@@ -261,13 +262,17 @@ sub Commit {
         if ($pcps) {
             $self->SetRecipients($pcps);
 
+            my $from = RT->Config->Get('CorrespondAddress');
+            $from = $emailFrom if $emailFrom;
+
             my $res = RT::Interface::Email::SendEmailUsingTemplate(
-                'Template' => 'Escalation',
+                'Template' => 'Escalation_Email',
                 'Arguments' => \%tplArgs,
                 'To' => join(',', @{$self->{'Emails'}}),
+                'From' => $from,
                 'ExtraHeaders' => {'Content-Type' => "text/html; charset=\"UTF-8\""}
             );
-            if ($res == 1) {
+            unless ($res) {
                 $RT::Logger->error('Ticket #' . $ticket->id . ': error while sending message. Recipients: ' . join(',', @{$self->{'Emails'}}));
                 return 0;
             }
