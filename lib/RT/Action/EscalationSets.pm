@@ -186,8 +186,7 @@ sub Commit {
     }
     my $eset = $esets{$escalationSet};
     unless ($eset->{$lvl} || $lvl == $defaultLvl) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
-        return 0;
+        $RT::Logger->warning("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
     }
     
     $date->config('setdate', 'zone,UTC');
