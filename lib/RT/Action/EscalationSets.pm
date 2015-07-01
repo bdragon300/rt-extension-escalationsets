@@ -8,7 +8,7 @@ use base qw(RT::Action);
 use Date::Manip::Date;
 use RT::Interface::Email;
 
-our $VERSION = '0.6';
+our $VERSION = '0.2';
 
 
 =head1 NAME
@@ -84,9 +84,9 @@ sub Prepare {
     }
 
     ## Check escalation principals:
-    my $escPrincipals = RT->Config->Get('EscalationPrincipals');
+    my $escPrincipals = RT->Config->Get('EscalationActions');
     unless ($escPrincipals) {
-        $RT::Logger->error('Config: No EscalationPrincipals defined');
+        $RT::Logger->error('Config: No EscalationActions defined');
         return 0;
     }
     
@@ -145,9 +145,9 @@ sub Commit {
     my $cfLvl = RT->Config->Get('EscalationField');
     my $defaultLvl = RT->Config->Get('DefaultEscalationValue');
     my %principals = RT->Config->Get('EscalationPrincipals');
+    my %escActions = RT->Config->Get('EscalationActions');
     my %esets = RT->Config->Get('EscalationSets');
     my $writeComment = RT->Config->Get('WriteCommentOnEscalation');
-    my $emailFrom = RT->Config->Get("EscalationEmailFrom");
     my $timezone = RT->Config->Get('Timezone');
 
     # Ticket fields
@@ -181,7 +181,7 @@ sub Commit {
     $now->parse('now');
 
     unless (exists $esets{$escalationSet}) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ": unknown escalation set: $escalationSet");
+        $RT::Logger->error("Ticket #" . $ticket->id . ": unknown escalation set passed: $escalationSet");
         return 0;
     }
     my $eset = $esets{$escalationSet};
@@ -211,13 +211,13 @@ sub Commit {
     }
 
     # Determine whether its time to change escalation level CF
-    my $newLvl = undef;
-    for (sort { $b <=> $a; } keys %deltas) {
-        if ($deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'}) { # Kostyli, cmp() not properly works
-            $newLvl = $_;
-            last;
-        }
-    }
+    my @past = grep { $deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'} } # Kostyli-kostyliki, cmp() not properly works
+        sort { $deltas{$b}->{'data'}->{'length'} <=> $deltas{$a}->{'data'}->{'length'} } # Kostyli-kostyliki, cmp() not properly works
+        keys %deltas;
+    my $newLvl = $past[0];
+
+
+    # Escalation level changed
     if (defined $newLvl && $lvl ne $newLvl) {
         my ($val, $msg) = $ticket->AddCustomFieldValue(Field => $cfLvl, Value => $newLvl);
         unless ($val) {
@@ -226,63 +226,101 @@ sub Commit {
         }
         $RT::Logger->info("Ticket #" . $ticket->id . ': CF.' . $cfLvl . " changed " . $lvl . ' -> ' . $newLvl);
 
-
-        my %tplArgs = (
+        # What to pass to templates
+        my %t = (
             'Ticket' => $ticket,
             'EscalationLevel' => $newLvl,
             'CreatedTimeAgo' => $nowDelta->printf("%0hv:%0mv"),
         );
+        $self->{'templateArguments'} = \%t;
 
-        # Write comment if there is allowed in config
-        if ($writeComment) {
-            my $ctpl = RT::Template->new($self->CurrentUser );
-            my $res = $ctpl->LoadGlobalTemplate('Escalation_Comment');
-            unless ($res) {
-                $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation_Comment');
-                return 0;
-            }
-            my ($val, $msg) = $ctpl->Parse( %tplArgs );
-            unless ($val) {
-                $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation_Comment template: ' . $msg);
-            }
-            my ($trid, $trmsg, $trobj) = $ticket->Comment(
-                MIMEObj => $ctpl->MIMEObj,
-                TimeTaken => 0,
-            );
-            unless ($trid) {
-                $RT::Logger->error("Ticket #" . $ticket->id . ': error while write comment: ' . $trmsg);
-                return 0;
-            }
-            $RT::Logger->info("Ticket #" . $ticket->id . ': comment successfully wrote');
-        }
-
-        # Set email notification parameters
-        my $pcps = $principals{$newLvl};
-        if ($pcps) {
-            $self->SetRecipients($pcps);
-
-            my $from = RT->Config->Get('CorrespondAddress');
-            $from = $emailFrom if $emailFrom;
-
-            my $res = RT::Interface::Email::SendEmailUsingTemplate(
-                'Template' => 'Escalation_Email',
-                'Arguments' => \%tplArgs,
-                'To' => join(',', @{$self->{'Emails'}}),
-                'From' => $from,
-                'ExtraHeaders' => {'Content-Type' => "text/html; charset=\"UTF-8\""}
-            );
-            unless ($res) {
-                $RT::Logger->error('Ticket #' . $ticket->id . ': error while sending message. Recipients: ' . join(',', @{$self->{'Emails'}}));
-                return 0;
-            }
-        } else {
-            $RT::Logger->warning('Ticket #' . $ticket->id . ": no principal found for escalation level " . $newLvl);
-        }
+        $self->HandleActions($escActions{$newLvl}, $ticket);
 
     } else {
         $RT::Logger->debug("Ticket #" . $ticket->id . ": escalation level not changed");
     }
     return 1;
+}
+
+sub HandleActions {
+    my $self = shift;
+    my $actions = shift;
+    my $ticket = shift;
+
+    my $ret = 1;
+
+    # Notify principals by email
+    if ($actions->{'notify'}) {
+        my $principals = $actions->{'notify'};
+        my $res = $self->SendEmail($principals);
+        unless ($res) {
+            $RT::Logger->error("Ticket #" . $ticket->id . ': unable to send notifications. Recipients: ' . join(',', @{$self->{'Emails'}}));
+            $ret = 0;
+        }
+        if ($res) {
+            $RT::Logger->info("Ticket #" . $ticket->id . ': Notifications successfully sended');
+        }
+    }
+
+    # Write comment in ticket
+    if ($actions->{'comment'}) {
+        my $res = $self->WriteComment($ticket);
+        unless ($res) {
+            $RT::Logger->error("Ticket #" . $ticket->id . ': Unable to write comment');
+            $ret = 0;
+        }
+        if ($res) {
+            $RT::Logger->info("Ticket #" . $ticket->id . ': Comment successfully wrote');
+        }
+    }
+    return $ret;
+}
+
+sub WriteComment {
+    my $self = shift;
+    my $ticket = shift;
+
+    my $ctpl = RT::Template->new($self->CurrentUser );
+    my $res = $ctpl->LoadGlobalTemplate('Escalation_Comment');
+    unless ($res) {
+        $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation_Comment');
+        return 0;
+    }
+    my ($val, $msg) = $ctpl->Parse( %{ $self->{'templateArguments'} } );
+    unless ($val) {
+        $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation_Comment template: ' . $msg);
+        return 0;
+    }
+    my ($trid, $trmsg, $trobj) = $ticket->Comment(
+        MIMEObj => $ctpl->MIMEObj,
+        TimeTaken => 0,
+    );
+    unless ($trid) {
+        $RT::Logger->error("Ticket #" . $ticket->id . ': error while write comment: ' . $trmsg);
+        return 0;
+    }
+    return 1;
+}
+
+sub SendEmail {
+    my $self = shift;
+    my $principals = shift; # String: "user1,user2,group"
+
+    if ($principals) {
+        $self->SetRecipients($principals);
+        my $from = RT->Config->Get('CorrespondAddress');
+        my $configFrom = RT->Config->Get("EscalationEmailFrom");
+        $from = $configFrom if $configFrom;
+
+        return RT::Interface::Email::SendEmailUsingTemplate(
+            'Template' => 'Escalation_Email',
+            'Arguments' => $self->{'templateArguments'},
+            'To' => join(',', @{$self->{'Emails'}}),
+            'From' => $from,
+            'ExtraHeaders' => {'Content-Type' => "text/html; charset=\"UTF-8\""}
+        );
+    }
+    return 0;
 }
 
 sub SetRecipients {
