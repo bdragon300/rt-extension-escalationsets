@@ -199,8 +199,6 @@ sub Commit {
         $ticketdateobj{$_}->convert($timezone);
     }
 
-    print $ticketdateobj{'starts'}->printf("%s");
-
     # Create hash {lvl=>Date::Manip::Date}
     my %deadlineType = ();
     my %expiredDates = ();
