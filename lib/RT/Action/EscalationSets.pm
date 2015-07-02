@@ -334,8 +334,7 @@ sub SendEmail {
             'Template' => 'Escalation_Email',
             'Arguments' => $self->{'templateArguments'},
             'To' => join(',', @{$self->{'Emails'}}),
-            'From' => $from,
-            'ExtraHeaders' => {'Content-Type' => "text/html; charset=\"UTF-8\""}
+            'From' => $from
         );
     }
     return 0;
