@@ -152,9 +152,11 @@ sub Commit {
 
     # Ticket fields
     my $ticket = $self->TicketObj;
-    my $starts = $ticket->Starts;
     my $due = $ticket->Due;
-    my $created = $ticket->Created;
+    my %ticketdate = (
+        'created' => $ticket->Created,
+        'starts' => $ticket->Starts
+    );
     my $lvl = $ticket->FirstCustomFieldValue($cfLvl);
 
     ## Set default escalation value if CF has no value
@@ -176,7 +178,6 @@ sub Commit {
         return 1;
     }
 
-    my $date = new Date::Manip::Date;
     my $now = new Date::Manip::Date;
     $now->parse('now');
 
@@ -188,32 +189,47 @@ sub Commit {
     unless ($eset->{$lvl} || $lvl == $defaultLvl) {
         $RT::Logger->warning("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
     }
-    
-    $date->config('setdate', 'zone,UTC');
-    $date->parse($created);
-    $date->convert($timezone);
 
-    # nowDelta = now - created
-    my $nowDelta = $now->calc($date, 1);
+    my %ticketdateobj = ();
+    for (keys %ticketdate) {
+        last unless $ticketdate{$_};
+        $ticketdateobj{$_} = new Date::Manip::Date;
+        $ticketdateobj{$_}->config('setdate', 'zone,UTC');
+        $ticketdateobj{$_}->parse($ticketdate{$_});
+        $ticketdateobj{$_}->convert($timezone);
+    }
 
-    # Create hash {lvl=>DateManip::Delta}
-    my %deltas = ();
-    for (keys %$eset) {
-        my $x = $date->new_delta();
-        my $res = $x->parse($eset->{$_}->{created}) if $eset->{$_}->{created};
-        if ($res == 1 || ! defined $res) {
-            $RT::Logger->error("Config: Cannot parse escalation time value '" . $eset->{$_} . "' in " . $escalationSet . '->' . $_);
-            return 0;
+    print $ticketdateobj{'starts'}->printf("%s");
+
+    # Create hash {lvl=>Date::Manip::Date}
+    my %deadlineType = ();
+    my %expiredDates = ();
+    foreach my $l (keys %$eset) {
+        for (keys %ticketdate) {
+            if ($eset->{$l}->{$_}) {
+                unless ($ticketdateobj{$_}->printf("%s")) { 
+                    $RT::Logger->warning('Ticket #' . $ticket->id . ': ' . ucfirst $_ . ' is empty, but specified in escalation ' . $escalationSet . ':' . $l);
+                    next;
+                }
+                my $dlt = $ticketdateobj{$_}->new_delta();
+                my $res = $dlt->parse($eset->{$l}->{$_});
+                if ($res == 1) {
+                    $RT::Logger->error("Config: Cannot parse escalation time value '" . $eset->{$l} . "' in " . $escalationSet . ':' . $l);
+                    return 0;
+                }
+                $expiredDates{$l} = $ticketdateobj{$_}->calc($dlt);
+                $deadlineType{$l} = $_;
+            }
         }
-        $x->cmp($nowDelta); # Kostyli
-        $nowDelta->cmp($x); # Kostyli, see below
-        $deltas{$_} = $x;
     }
 
     # Determine whether its time to change escalation level CF
-    my @past = grep { $deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'} } # Kostyli-kostyliki, cmp() not properly works
-        sort { $deltas{$b}->{'data'}->{'length'} <=> $deltas{$a}->{'data'}->{'length'} } # Kostyli-kostyliki, cmp() not properly works
-        keys %deltas;
+    my @past = grep { $expiredDates{$_}->cmp($now) < 0 } 
+        sort { $expiredDates{$b}->cmp($expiredDates{$a}) }
+        keys %expiredDates;
+    # my @past = grep { $deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'} } # 
+    #     sort { $deltas{$b}->{'data'}->{'length'} <=> $deltas{$a}->{'data'}->{'length'} }    # Kostyli-kostyliki, cmp() not properly works
+    #     keys %deltas;
     my $newLvl = $past[0];
 
 
@@ -227,10 +243,12 @@ sub Commit {
         $RT::Logger->info("Ticket #" . $ticket->id . ': CF.' . $cfLvl . " changed " . $lvl . ' -> ' . $newLvl);
 
         # What to pass to templates
-        my %t = (
+        my %t = map { ucfirst $_ . 'Delta' => $now->calc($ticketdateobj{$_}, 1) } keys %ticketdate;
+        %t = (
             'Ticket' => $ticket,
             'EscalationLevel' => $newLvl,
-            'CreatedTimeAgo' => $nowDelta->printf("%0hv:%0mv"),
+            'DeadlineType' => $deadlineType{$newLvl},
+            %t
         );
         $self->{'templateArguments'} = \%t;
 
