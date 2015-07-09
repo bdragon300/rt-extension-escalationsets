@@ -147,16 +147,26 @@ sub Commit {
     my %principals = RT->Config->Get('EscalationPrincipals');
     my %escActions = RT->Config->Get('EscalationActions');
     my %esets = RT->Config->Get('EscalationSets');
-    my $writeComment = RT->Config->Get('WriteCommentOnEscalation');
     my $timezone = RT->Config->Get('Timezone');
 
     # Ticket fields
     my $ticket = $self->TicketObj;
-    my $due = $ticket->Due;
     my %ticketdate = (
         'created' => $ticket->Created,
-        'starts' => $ticket->Starts
+        'starts' => $ticket->Starts,
+        'due' => $ticket->Due,
     );
+
+    ## MySQL date time format:
+    my $format = '%Y-%m-%d %T';
+
+    ## UNIX timestamp 0:
+    my $notSet = '1970-01-01 00:00:00';
+
+    unless (exists $esets{$escalationSet}) {
+        $RT::Logger->error("Ticket #" . $ticket->id . ": unknown escalation set passed: $escalationSet");
+        return 0;
+    }
     my $lvl = $ticket->FirstCustomFieldValue($cfLvl);
 
     ## Set default escalation value if CF has no value
@@ -175,29 +185,54 @@ sub Commit {
             $RT::Logger->error("Ticket #" . $ticket->id . ': could not set escalation level: ' . $msg);
             return 0;
         }
-        return 1;
     }
 
-    my $now = new Date::Manip::Date;
-    $now->parse('now');
-
-    unless (exists $esets{$escalationSet}) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ": unknown escalation set passed: $escalationSet");
-        return 0;
-    }
     my $eset = $esets{$escalationSet};
     unless ($eset->{$lvl} || $lvl == $defaultLvl) {
         $RT::Logger->warning("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
     }
 
+    # Special values in escalation set
+    my %esetspecial = (
+        'dueinterval' => $eset->{'dueinterval'},
+    );
+    delete $eset->{$_} for keys %esetspecial;
+
     my %ticketdateobj = ();
     for (keys %ticketdate) {
-        last unless $ticketdate{$_};
+        next unless $ticketdate{$_};
         $ticketdateobj{$_} = new Date::Manip::Date;
         $ticketdateobj{$_}->config('setdate', 'zone,UTC');
         $ticketdateobj{$_}->parse($ticketdate{$_});
         $ticketdateobj{$_}->convert($timezone);
     }
+
+    # Set Due to default value
+    my $dueinterval = $esetspecial{"dueinterval"};
+    my $dueintervalobj = undef;
+    if ($dueinterval) {
+        for (("starts", "created")) {
+            if ($dueinterval->{$_} && $ticketdate{$_}) {
+                $dueintervalobj = $ticketdateobj{$_}->new_delta() ;
+                $dueintervalobj->parse($dueinterval->{$_});
+            }
+            if ($dueintervalobj && $ticketdate{"due"} eq $notSet) {
+                my $newdueobj = $ticketdateobj{$_}->calc($dueintervalobj, 0);
+                $newdueobj->convert("UTC");
+                my $newdue = $newdueobj->printf($format);
+                my ($res, $msg) = $ticket->SetDue($newdue);
+                unless ($res) {
+                    $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set Due:" . $msg);
+                    return 0;
+                }
+                $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newdue);
+            }
+            last if $dueintervalobj;
+        }
+    }
+
+    my $now = new Date::Manip::Date;
+    $now->parse('now');
 
     # Create hash {lvl=>Date::Manip::Date}
     my %deadlineType = ();
@@ -206,7 +241,7 @@ sub Commit {
         for (keys %ticketdate) {
             if ($eset->{$l}->{$_}) {
                 unless ($ticketdateobj{$_}->printf("%s")) { 
-                    $RT::Logger->warning('Ticket #' . $ticket->id . ': ' . ucfirst $_ . ' is empty, but specified in escalation ' . $escalationSet . ':' . $l);
+                    #$RT::Logger->warning('Ticket #' . $ticket->id . ': ' . ucfirst $_ . ' is empty, but specified in escalation ' . $escalationSet . ':' . $l);
                     next;
                 }
                 my $dlt = $ticketdateobj{$_}->new_delta();
@@ -241,12 +276,15 @@ sub Commit {
         $RT::Logger->info("Ticket #" . $ticket->id . ': CF.' . $cfLvl . " changed " . $lvl . ' -> ' . $newLvl);
 
         # What to pass to templates
-        my %t = map { ucfirst $_ . 'Delta' => $now->calc($ticketdateobj{$_}, 1) } keys %ticketdate;
+        my %t = map { ucfirst $_  => $ticketdateobj{$_} } keys %ticketdate;
+        my %d = map { ucfirst $_ . 'Delta' => $now->calc($ticketdateobj{$_}, 1) } keys %ticketdate;
         %t = (
             'Ticket' => $ticket,
             'EscalationLevel' => $newLvl,
             'DeadlineType' => $deadlineType{$newLvl},
-            %t
+            'DueInterval' => $dueintervalobj,
+            %t,
+            %d
         );
         $self->{'templateArguments'} = \%t;
 
