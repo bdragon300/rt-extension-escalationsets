@@ -144,7 +144,6 @@ sub Commit {
     # Read configuration
     my $cfLvl = RT->Config->Get('EscalationField');
     my $defaultLvl = RT->Config->Get('DefaultEscalationValue');
-    my %principals = RT->Config->Get('EscalationPrincipals');
     my %escActions = RT->Config->Get('EscalationActions');
     my %esets = RT->Config->Get('EscalationSets');
     my $timezone = RT->Config->Get('Timezone');
@@ -196,7 +195,7 @@ sub Commit {
     my %esetspecial = (
         'dueinterval' => $eset->{'dueinterval'},
     );
-    delete $eset->{$_} for keys %esetspecial;
+    #delete $eset->{$_} for keys %esetspecial;
 
     my %ticketdateobj = ();
     for (keys %ticketdate) {
@@ -239,7 +238,7 @@ sub Commit {
     my %expiredDates = ();
     foreach my $l (keys %$eset) {
         for (keys %ticketdate) {
-            if ($eset->{$l}->{$_}) {
+            if ($eset->{$l}->{$_} && ! defined $esetspecial{$l}) {
                 unless ($ticketdateobj{$_}->printf("%s")) { 
                     #$RT::Logger->warning('Ticket #' . $ticket->id . ': ' . ucfirst $_ . ' is empty, but specified in escalation ' . $escalationSet . ':' . $l);
                     next;
