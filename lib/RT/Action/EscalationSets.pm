@@ -334,14 +334,14 @@ sub WriteComment {
     my $ticket = shift;
 
     my $ctpl = RT::Template->new($self->CurrentUser );
-    my $res = $ctpl->LoadGlobalTemplate('Escalation_Comment');
+    my $res = $ctpl->LoadGlobalTemplate('Escalation Comment');
     unless ($res) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation_Comment');
+        $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation Comment');
         return 0;
     }
     my ($val, $msg) = $ctpl->Parse( %{ $self->{'templateArguments'} } );
     unless ($val) {
-        $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation_Comment template: ' . $msg);
+        $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation Comment template: ' . $msg);
         return 0;
     }
     my ($trid, $trmsg, $trobj) = $ticket->Comment(
@@ -366,7 +366,7 @@ sub SendEmail {
         $from = $configFrom if $configFrom;
 
         return RT::Interface::Email::SendEmailUsingTemplate(
-            'Template' => 'Escalation_Email',
+            'Template' => 'Escalation Email',
             'Arguments' => $self->{'templateArguments'},
             'To' => join(',', @{$self->{'Emails'}}),
             'From' => $from

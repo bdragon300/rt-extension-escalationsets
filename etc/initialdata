@@ -1,0 +1,90 @@
+use strict;
+use warnings;
+
+our @CustomFields = (
+{
+    Name        => 'Escalation level',
+    Description => 'Level that ticket escalated to',
+    Type        => 'FreeformSingle',
+    LookupType  => 'RT::Queue-RT::Ticket',
+}
+);
+
+our @ScripActions = (
+{
+	Name        => 'Increase Due',
+	Description => 'Increase Due to the future based on Starts field',
+	ExecModule  => 'IncreaseDue',
+	Argument    => '',
+}
+);
+
+our @ScripConditions = (
+{
+	Name        => 'On Field Set',
+	Description => 'Whenever standard field of ticket changed like Starts, Due, etc.',
+	ExecModule  => 'AnyTransaction',
+	Argument    => '',
+	ApplicableTransTypes => 'Set',
+}
+);
+
+our @Scrips = (
+{
+	Queue       => 0,
+	Description => 'On Starts change Increase Due',
+	ScripCondition => 'On Field Set',
+	ScripAction => 'Increase Due',
+	Template    => 'Blank',
+}
+);
+
+our @Templates = (
+{
+	Name        => 'Escalation Email',
+	Description => 'What will be send to email when escalation will occur',
+	Type        => 'Perl',
+	Queue       => 0,
+	Content     => <<'CONTENTS'
+Subject: Escalation #{$Ticket->id} {$EscalationLevel} level
+Content-Type: text/html; charset="UTF-8"
+
+<p>Ticket <a href="{RT->Config->Get("WebURL")}Ticket/Display.html?id={$Ticket->id}">#{$Ticket->id}</a> was escalated to {$EscalationLevel} level. {
+if ($DeadlineType eq "created") { 
+    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
+}
+elsif ($DeadlineType eq "starts") {
+    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
+} 
+elsif ($DeadlineType eq "due") {
+    $t = $DueInterval->calc($DueDelta);
+    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
+}
+$x}.</p>
+CONTENTS
+
+},
+
+{
+	Name        => 'Escalation Comment',
+	Description => 'What will be left as comment when escalation will occur',
+	Type        => 'Perl',
+	Queue       => 0,
+	Content     => <<'CONTENTS'
+
+Ticket #{$Ticket->id} was escalated to {$EscalationLevel} level. {
+if ($DeadlineType eq "created") { 
+    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
+}
+elsif ($DeadlineType eq "starts") {
+    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
+} 
+elsif ($DeadlineType eq "due") {
+    $t = $DueInterval->calc($DueDelta);
+    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
+}
+$x}.
+CONTENTS
+
+}
+);
