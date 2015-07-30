@@ -108,6 +108,7 @@ Each template receives following variables:
 # Example
 
 Initial configuration:
+
 ```
 Set($EscalationField, 'Escalation Level');
 Set($DefaultEscalationValue, '0');
@@ -115,6 +116,7 @@ Set($EscalationEmailFrom, 'rt-escalation@example.com');
 ```
 
 Let's define two escalation sets:
+
 * RFI (Request for information) - 2 escalation levels
 * incident - 3 escalation levels
 
@@ -131,9 +133,11 @@ Set(%EscalationSets, (
                   },
 ));
 ```
+
 All levels counting from Due and specify as "x minutes left before Due". For RFI tickets Due will be set to +32 hours from created time, for incident +1 hour from created time.
 
 Now what we want to do on each escalation process?
+
 ```
 Set(%EscalationActions, (
         '1' => {'notify' => 'support'},
@@ -141,11 +145,14 @@ Set(%EscalationActions, (
         '3' => {'notify' => 'boss,109', "comment" => 1},
 ));
 ```
+
 Here we notify specified RT users and groups. On 2 and 3 level the comment to ticket also will be added.
 
 Now we can use rt-crontool to call this extension periodically. Add to crontab following:
+
 ```
 * * * * * /usr/bin/rt-crontool --search RT::Search::FromSQL --search-arg "(Status = 'new' OR Status = 'open') AND Queue == 'support' AND CF.Type = 'RFI'" --action RT::Action::EscalationSets --action-arg 'RFI'
 * * * * * /usr/bin/rt-crontool --search RT::Search::FromSQL --search-arg "(Status = 'new' OR Status = 'open') AND Queue == 'support' AND CF.Type = 'Incident'" --action RT::Action::EscalationSets --action-arg 'incident'
 ```
+
 Now for different types of tickets defferent SLA will be applied.
