@@ -193,7 +193,7 @@ sub Commit {
 
     # Special values in escalation set
     my %esetspecial = (
-        'dueinterval' => $eset->{'dueinterval'},
+        'dueinterval' => $eset->{'_dueinterval'},
     );
     #delete $eset->{$_} for keys %esetspecial;
 

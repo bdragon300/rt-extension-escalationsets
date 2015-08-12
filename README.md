@@ -6,7 +6,7 @@ EscalationSets allows to escalate tickets and to apply different SLA depending o
 
 Central concept is "set". It contains SLA time and escalation levels with their timeouts for tickets in this set. You can define TicketSQL expression and bind "set" with it, i.e. you can specify different SLA, for example, depending on CustomFields.
 
-The extension calls periodically via rt-crontool to check SLA time of tickets using name of set passed as argument. If value in CF *$EscalationField* is empty then it fills by *$DefaultEscalationValue*. Also if Due is empty and **dueinterval** is specified (see below) then Due will be set. Next extension compares time of ticket (Created, Starts, etc.) and values in specified escalation set and performs escalation if necessary. When escalation performs some additional actions can be performed (send email, write comment). After this new escalation level will be writed to CF *$EscalationField*.
+The extension calls periodically via rt-crontool to check SLA time of tickets using name of set passed as argument. If value in CF *$EscalationField* is empty then it fills by *$DefaultEscalationValue*. Also if Due is empty and **_dueinterval** is specified (see below) then Due will be set. Next extension compares time of ticket (Created, Starts, etc.) and values in specified escalation set and performs escalation if necessary. When escalation performs some additional actions can be performed (send email, write comment). After this new escalation level will be writed to CF *$EscalationField*.
 
 When ticket Starts changed then Due will be automatically recalculate.
 
@@ -68,7 +68,7 @@ Value has following structure:
 
 In *`<escalation_level>`* special keys also can be specified (not interpret as level):
 
-* **dueinterval** - when extension will passes ticket for the first time it also will set Due. *`<time_moment>`* possible values: **starts**, **created**.
+* **_dueinterval** - when extension will passes ticket for the first time it also will set Due. *`<time_moment>`* possible values: **starts**, **created**.
 
 ### %EscalationActions
 
@@ -97,7 +97,7 @@ Each template receives following variables:
 * *$Ticket* - RT::Ticket obj
 * *$EscalationLevel* - new escalation level
 * *$DeadlineType* - *`<time_moment>`* of current escalation level (**created**, **starts**, **due**)
-* *$DueInterval* - if **dueinterval** special key specified then this var contains Date::Manip::Delta object with that value
+* *$DueInterval* - if **_dueinterval** special key specified then this var contains Date::Manip::Delta object with that value
 * *$Starts*, *$Created*, *$Due* - Date::Manip::Date object with appropriate values
 * *$StartsDelta*, *$CreatedDelta*, *$DueDelta* - Date::Manip::Delta between NOW and appropriate value
 
@@ -124,12 +124,12 @@ Let's define two escalation sets:
 Set(%EscalationSets, (
     'RFI' =>      {'1' => {due => '-4 hours 50 minutes'},
                    '2' => {due => '-2 hours 7 minutes'},
-                   'dueinterval' => {created => '32 hours'}
+                   '_dueinterval' => {created => '32 hours'}
                   },
     'incident' => {'1' => {due => '-30 minutes'},
                    '2' => {due => '-25 minutes'},
                    '3' => {due => '-15 minutes'},
-                   'dueinterval' => {created => '1 hour'}
+                   '_dueinterval' => {created => '1 hour'}
                   },
 ));
 ```
