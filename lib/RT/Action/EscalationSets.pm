@@ -151,8 +151,7 @@ sub Commit {
     # Ticket fields
     my $ticket = $self->TicketObj;
     my %ticketdate = (
-        'created' => $ticket->Created,
-        'starts' => $ticket->Starts,
+        'started' => $ticket->Started,
         'due' => $ticket->Due,
     );
 
@@ -210,24 +209,22 @@ sub Commit {
     my $dueinterval = $esetspecial{"dueinterval"};
     my $dueintervalobj = undef;
     if ($dueinterval) {
-        for (("starts", "created")) {
-            if ($dueinterval->{$_} && $ticketdate{$_}) {
-                $dueintervalobj = $ticketdateobj{$_}->new_delta() ;
-                $dueintervalobj->parse($dueinterval->{$_});
-            }
-            if ($dueintervalobj && $ticketdate{"due"} eq $notSet) {
-                my $newdueobj = $ticketdateobj{$_}->calc($dueintervalobj, 0);
-                $newdueobj->convert("UTC");
-                my $newdue = $newdueobj->printf($format);
-                my ($res, $msg) = $ticket->SetDue($newdue);
-                unless ($res) {
-                    $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set Due:" . $msg);
-                    return 0;
-                }
-                $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newdue);
-            }
-            last if $dueintervalobj;
+        if ($dueinterval->{'started'}) {
+            $dueintervalobj = $ticketdateobj{'started'}->new_delta() ;
+            $dueintervalobj->parse($dueinterval->{'started'});
         }
+        if ($dueintervalobj && $ticketdate{"due"} eq $notSet) {
+            my $newdueobj = $ticketdateobj{'started'}->calc($dueintervalobj, 0);
+            $newdueobj->convert("UTC");
+            my $newdue = $newdueobj->printf($format);
+            my ($res, $msg) = $ticket->SetDue($newdue);
+            unless ($res) {
+                $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set Due:" . $msg);
+                return 0;
+            }
+            $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newdue);
+        }
+        last if $dueintervalobj;
     }
 
     my $now = new Date::Manip::Date;
