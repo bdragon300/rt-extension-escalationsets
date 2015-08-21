@@ -348,6 +348,9 @@ sub Commit {
 
         # Perform escalation
         if ($newLvl ne $defaultLvl) {
+            my $dueIntervalObj = $ticketdateobj{'created'}->new_delta;
+            $dueIntervalObj->parse($esetspecial{'_dueinterval'}->{'created'});
+
             # What to pass to templates
             my %t = map { ucfirst $_  => $ticketdateobj{$_} } keys %ticketdate; # Date::Manip::Date objects: Created, Due
             my %d = map { ucfirst $_ . 'Delta' => $now->calc($ticketdateobj{$_}, 1) } keys %ticketdate; #CreatedDelta, DueDelta
@@ -355,7 +358,7 @@ sub Commit {
                 'Ticket' => $ticket,
                 'EscalationLevel' => $newLvl,
                 'DeadlineType' => $deadlineType{$newLvl},
-                'DueInterval' => $self->newDateObj($esetspecial{'_dueinterval'}->{'created'}, $timezone),
+                'DueInterval' => $dueIntervalObj,
                 %t,
                 %d
             );
