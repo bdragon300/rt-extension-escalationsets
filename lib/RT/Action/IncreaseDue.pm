@@ -4,7 +4,7 @@ use 5.010;
 use strict;
 use warnings;
 
-use base qw(RT::Action);
+use base qw(RT::Extension::EscalationSets RT::Action);
 use Date::Manip::Date;
 
 our $VERSION = '0.1';
@@ -91,9 +91,13 @@ After preparation this method commits the action.
 sub Commit {
     my $self = shift;
 
+    # Read config
+    # my @pausedStatuses = RT->Config->Get('EscalationActions') || qw(stalled);
+
     # Ticket fields
     my $ticket = $self->TicketObj;
     my $due = $ticket->Due;
+    my $status = $ticket->Status;
     my $txn = $self->TransactionObj;
 
     return 0 unless $txn;
@@ -104,20 +108,19 @@ sub Commit {
     ## MySQL date time format:
     my $format = '%Y-%m-%d %T';
 
-    my $dueObj = $self->newDateObj($due, $timezone);
+    my $nowObj = new Date::Manip::Date;
+    $nowObj->parse("now");
+
+    my $old = $txn->OldValue;
+    my $new = $txn->NewValue;
+    my $newDueObj = undef;
 
     if ($txn->Type eq "Set" && $txn->Field eq "Starts") {
-        my $nowObj = new Date::Manip::Date;
-        $nowObj->parse("now");
-
-        my $old = $txn->OldValue;
-        my $new = $txn->NewValue;
-
+        my $dueObj = $self->newDateObj($due, $timezone);
         my $oldObj = $self->newDateObj($old, $timezone);
         my $newObj = $self->newDateObj($new, $timezone);
-        my $newDueObj = $dueObj;
-
         my $newDueDeltaObj = undef;
+
         if ($self->cmpDates($nowObj, $oldObj) < 0 && $self->cmpDates($nowObj, $newObj) < 0) { 
             $newDueDeltaObj = $newObj->calc($oldObj, 1); # delta=new-old
             $newDueObj = $dueObj->calc($newDueDeltaObj, 0);  # due+=delta
@@ -132,7 +135,8 @@ sub Commit {
         } else {
             return 0;
         }
-        $newDueObj = $dueObj if ($self->cmpDates($oldObj, $dueObj) > 0 || $self->cmpDates($nowObj, $dueObj) > 0);
+        $newDueObj = $dueObj->new_date if ($self->cmpDates($oldObj, $dueObj) > 0 || $self->cmpDates($nowObj, $dueObj) > 0);
+
         $newDueObj->convert("UTC");
         my $newDue = $newDueObj->printf($format);
         
@@ -143,32 +147,12 @@ sub Commit {
                 return 0;
             }
         } else {
-            $RT::Logger->debug("Ticket #" . $ticket->id . ": Due in past or Starts is later than Due" );
+            $RT::Logger->warning("Ticket #" . $ticket->id . ": Due in past or Starts is later than Due" );
         }
     }
+    
 
     return 1;
-}
-
-sub newDateObj {
-    my $self = shift;
-    my $val = shift;
-    my $tz = shift;
-
-    my $obj = new Date::Manip::Date;
-    $obj->config('setdate', 'zone,UTC');
-    $obj->parse($val);
-    $obj->convert($tz);
-
-    return $obj;
-}
-
-sub cmpDates {
-    my $self = shift;
-    my $a = shift;
-    my $b = shift;
-
-    return ($a->printf("%s") cmp $b->printf("%s"));
 }
 
 1;

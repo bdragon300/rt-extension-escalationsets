@@ -75,4 +75,27 @@ Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
 =cut
 
+
+sub newDateObj {
+    my $self = shift;
+    my $val = shift;
+    my $tz = shift;
+
+    my $obj = new Date::Manip::Date;
+    $obj->config('setdate', 'zone,UTC');
+    $obj->parse($val);
+    $obj->convert($tz);
+
+    return $obj;
+}
+
+# This function exists because Date::Manip::Date::cmp sometimes not properly works
+sub cmpDates {
+    my $self = shift;
+    my $a = shift;
+    my $b = shift;
+
+    return ($a->printf("%s") cmp $b->printf("%s"));
+}
+
 1;
