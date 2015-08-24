@@ -93,11 +93,11 @@ sub Prepare {
     
 
     ## Check configured default escalation value:
-    my $defaultPriority = RT->Config->Get('DefaultEscalationValue');
-    unless (defined $defaultPriority) {
-        $RT::Logger->error('Config: DefaultEscalationValue not set.');
-        return 0;
-    }
+    # my $defaultPriority = RT->Config->Get('DefaultEscalationValue');
+    # unless (defined $defaultPriority) {
+    #     $RT::Logger->error('Config: DefaultEscalationValue not set.');
+    #     return 0;
+    # }
 
     ## Check configured Date::Manip:
     ## TODO This could throw 2 warnings:
@@ -177,9 +177,10 @@ sub Commit {
 
     ####
 
+    $defaultLvl = "" unless (defined $defaultLvl);
     $lvl = "" unless (defined $lvl);
     my $newLvl = $lvl;
-    $newLvl = $defaultLvl if ($lvl eq "");
+    $newLvl = $defaultLvl if ($lvl eq "" && $defaultLvl ne "");
 
     my $eset = $esets{$escalationSet};
     if ($lvl ne $defaultLvl
