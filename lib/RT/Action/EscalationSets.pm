@@ -93,11 +93,11 @@ sub Prepare {
     
 
     ## Check configured default escalation value:
-    my $defaultPriority = RT->Config->Get('DefaultEscalationValue');
-    unless (defined $defaultPriority) {
-        $RT::Logger->error('Config: DefaultEscalationValue not set.');
-        return 0;
-    }
+    # my $defaultPriority = RT->Config->Get('DefaultEscalationValue');
+    # unless (defined $defaultPriority) {
+    #     $RT::Logger->error('Config: DefaultEscalationValue not set.');
+    #     return 0;
+    # }
 
     ## Check configured Date::Manip:
     ## TODO This could throw 2 warnings:
@@ -166,7 +166,7 @@ sub Commit {
         'created' => $ticket->Created,
         'due' => $ticket->Due,
     );
-    my $lvl = $ticket->FirstCustomFieldValue($cfLvl) || "";
+    my $lvl = $ticket->FirstCustomFieldValue($cfLvl);
     my $set = $ticket->FirstCustomFieldValue($cfSet) || "";
 
     ## MySQL date time format:
@@ -177,13 +177,13 @@ sub Commit {
 
     ####
 
+    $defaultLvl = "" unless (defined $defaultLvl);
+    $lvl = "" unless (defined $lvl);
     my $newLvl = $lvl;
-
-    ## Set default escalation value if CF has no value
-    $newLvl = $defaultLvl unless (defined $newLvl);
+    $newLvl = $defaultLvl if ($lvl eq "" && $defaultLvl ne "");
 
     my $eset = $esets{$escalationSet};
-    if ($lvl ne ""
+    if ($lvl ne $defaultLvl
         && ! exists $eset->{$lvl}) 
     {
         $RT::Logger->warning("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
@@ -293,7 +293,7 @@ sub Commit {
                     $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set Due: " . $msg);
                     return 0;
                 }
-                $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newDueObj->printf($format));
+                $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newdue);
 
                 $ticketdate{'due'} = $newdue;
                 $ticketdateobj{'due'} = $self->newDateObj($ticketdate{'due'}, $timezone);
@@ -335,8 +335,7 @@ sub Commit {
     # my @past = grep { $deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'} } # 
     #     sort { $deltas{$b}->{'data'}->{'length'} <=> $deltas{$a}->{'data'}->{'length'} }    # Kostyli-kostyliki, cmp() not properly works
     #     keys %deltas;
-    $newLvl = $past[0] || "";
-
+    $newLvl = $past[0] || $newLvl;
 
     if ($lvl ne $newLvl) {
         my ($val, $msg) = $ticket->AddCustomFieldValue(Field => $cfLvl, Value => $newLvl);
