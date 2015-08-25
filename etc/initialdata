@@ -7,37 +7,16 @@ our @CustomFields = (
     Description => 'Level that ticket escalated to',
     Type        => 'FreeformSingle',
     LookupType  => 'RT::Queue-RT::Ticket',
+},
+
+{
+    Name        => 'Escalation set',
+    Description => 'Current ticket escalation set',
+    Type        => 'FreeformSingle',
+    LookupType  => 'RT::Queue-RT::Ticket',
 }
 );
 
-our @ScripActions = (
-{
-	Name        => 'Increase Due',
-	Description => 'Increase Due to the future based on Starts field',
-	ExecModule  => 'IncreaseDue',
-	Argument    => '',
-}
-);
-
-our @ScripConditions = (
-{
-	Name        => 'On Field Set',
-	Description => 'Whenever standard field of ticket changed like Starts, Due, etc.',
-	ExecModule  => 'AnyTransaction',
-	Argument    => '',
-	ApplicableTransTypes => 'Set',
-}
-);
-
-our @Scrips = (
-{
-	Queue       => 0,
-	Description => 'On Starts change Increase Due',
-	ScripCondition => 'On Field Set',
-	ScripAction => 'Increase Due',
-	Template    => 'Blank',
-}
-);
 
 our @Templates = (
 {
