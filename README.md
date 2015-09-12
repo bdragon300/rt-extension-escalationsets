@@ -1,6 +1,6 @@
 # Summary
 
-EscalationSets allows to escalate tickets and to apply different SLA depending on TicketSQL conditions.
+RT::Extension::EscalationSets - Different escalation rules (sets) for different tickets
 
 # Description
 
