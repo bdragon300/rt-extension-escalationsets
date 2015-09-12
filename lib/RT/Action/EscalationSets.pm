@@ -13,28 +13,61 @@ our $VERSION = '0.2';
 
 =head1 NAME
 
-C<RT::Action::EscalationSets> - Increment escalation custom field value based
-on escalation settings and notify RT users and groups associated with 
-escalation levels
-
+C<RT::Action::EscalationSets> - Makes check accordingly passed escalation set on
+each of given tickets. If its time to do escalation for the ticket then does it.
 
 =head1 DESCRIPTION
 
-This Action launches periodically via rt-crontool and reads escalation custom
-field of ticket. If ticket needs an escalation then this field is set to proper
-level and RT group and users associated with the level will be notified.  It 
-provides handling business hours defined in RT site configuration file.
+This Action uses fields:
+
+=over
+
+=item CF with current escalation level ($EscalationField in config);
+
+=item CF with current escalation set ($EscalationSetField in config);
+
+=item Due (if specified in config for current escalation set/level).
+
+=back
+
+Escalation set can be with specified B<_dueinterval> key (Due-like) and not. In
+first case it will use Due to escalate and you can specify escalation time based
+on Due. In second case ticket can escalate based only Created.
+
+Common rules are: 
+
+=over 
+
+=item When ticket in paused Status (stalled, etc.) then Due must be empty (some
+Scrip can do that);
+
+=item When ticket goes from paused Status then Due recalculates again based on last
+Due value (Due-like sets only);
+
+=item Actual set/value are always write in appropriate custom fields when extension
+passes the ticket;
+
+=item Ticket can go from Due-like to non-Due-like. Not conversely, because in this
+case we cannot correctly calculate Due. Of course, ticket can go 
+Due-like -> Due-like and non-Due-like -> non-Due-like sets;
+
+=item If escalation set has changed then Due must be also recalculated (between 
+Due-like sets);
+
+=item If ticket has another Due before EscalationSets firstly saw it and the current
+set is Due-like then Due will not be recalculated. This allows set another Due
+to some tickets.
+
+=back
+
+Extension tests ticket's fields (Created, Due) and determines whether its time
+to escalate ticket and to what level. On escalation configured actions will be
+performed (send email, write comment to the ticket). Next actual set and level
+will be wrote to approrpiate CustomFields.
 
 =head1 AUTHOR
 
-Igor Derkach, E<lt>id@miran.ruE<gt>
-
-
-=head1 SUPPORT AND DOCUMENTATION
-
-You can find documentation for this module with the C<perldoc> command.
-
-    perldoc RT::Extension::EscalationSets
+Igor Derkach, E<lt>gosha753951@gmail.comE<gt>
 
 
 =head1 BUGS
@@ -52,14 +85,7 @@ the same terms as Perl itself.
 Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
 
-=head1 SEE ALSO
-
-    RT
-    Date::Manip
-    RT::Extension::EscalationSets
-
-
-=head1 API
+=head1 METHODS
 
 
 =head2 Prepare
@@ -144,8 +170,8 @@ sub Prepare {
 
 =head2 Commit
 
-After preparation this method commits the action.
-
+After preparation this method commits the action. Returns 1 if everything is
+good. Calls by RT itself.
 
 =cut
 
@@ -373,6 +399,16 @@ sub Commit {
     return 1;
 }
 
+=head2 calculateDue DELTA, TRANSACTION
+
+Calculates Due value based on level definition due string (DELTA) in config.
+TRANSACTION - last Due unset transaction or undef
+
+Due simply calculates based on last Due value (NOW + value) or config string (Created + value)
+Returns Date::Manip::Date obj. 
+
+=cut
+
 sub calculateDue {
     my $self = shift;
     my $delta = shift; #string, i.e. "-3 minutes"
@@ -428,6 +464,12 @@ sub calculateDue {
     return $newDueObj;
 }
 
+=head2 getLastDueUnsetTxn
+
+Returns RT::Transaction object
+
+=cut
+
 sub getLastDueUnsetTxn {
     my $self = shift;
 
@@ -443,6 +485,13 @@ sub getLastDueUnsetTxn {
     $txns->OrderBy(FIELD => 'id', ORDER => 'DESC');
     return $txns->First;
 }
+
+=head2 HandleActions ACTIONS, TICKETOBJ
+
+Performs escalation actions listed in %EscalationActions config array
+ACTIONS - hashref to current escalation level actions
+
+=cut
 
 sub HandleActions {
     my $self = shift;
@@ -478,6 +527,12 @@ sub HandleActions {
     return $ret;
 }
 
+=head2 WriteComment TICKETOBJ
+
+Writes comment to ticket
+
+=cut
+
 sub WriteComment {
     my $self = shift;
     my $ticket = shift;
@@ -504,6 +559,12 @@ sub WriteComment {
     return 1;
 }
 
+=head2 SendEmail PRINCIPALS
+
+Sends emails to PRINCIPALS (string)
+
+=cut
+
 sub SendEmail {
     my $self = shift;
     my $principals = shift; # String: "user1,user2,group"
@@ -524,6 +585,12 @@ sub SendEmail {
     }
     return 0;
 }
+
+=head2 SetRecipients PRINCIPALS
+
+Converts PRINCIPALS string to destination email addresses list
+
+=cut
 
 sub SetRecipients {
     my $self = shift;

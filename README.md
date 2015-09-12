@@ -1,6 +1,6 @@
 # Summary
 
-EscalationSets allows to escalate tickets and to apply different SLA depending on TicketSQL conditions.
+RT::Extension::EscalationSets - Different escalation rules (sets) for different tickets
 
 # Description
 
@@ -25,7 +25,9 @@ Dependencies:
 Commands to install:
 
   perl Makefile.PL
+
   make
+  
   make install
 
 If you install this extension for the first time, you must to add needed objects to the database:
