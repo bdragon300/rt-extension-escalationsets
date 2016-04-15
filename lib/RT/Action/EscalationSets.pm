@@ -4,12 +4,12 @@ use 5.010;
 use strict;
 use warnings;
 
-use base qw(RT::Extension::EscalationSets RT::Action);
+use base qw(RT::Action);
 use Date::Manip::Date;
 use RT::Interface::Email;
 
 our $VERSION = '0.2';
-
+our $PACKAGE = __PACKAGE__;
 
 =head1 NAME
 
@@ -71,33 +71,33 @@ created yet?
 
 =cut
 
+use Data::Dumper qw(Dumper);
+
+## UNIX timestamp 0:
+use constant NOT_SET => '1970-01-01 00:00:00';
+
+## MySQL date time format:
+use constant DATE_FORMAT => '%Y-%m-%d %T';
+
+my @ticket_date_attrs = qw/Told Starts Started Due Resolved LastUpdated Created/; 
+
 sub Prepare {
     my $self = shift;
 
     my $ticket = $self->TicketObj;
-    my $escalationSet = $self->Argument;
+    my $escalation_set = $self->Argument;
+    
+    my $config = $self->{'escalation_set_config'} ||= RT::Extension::EscalationSets::load_config();
+    unless($config) {
+        RT::Logger->error("[RT::Extension::EscalationSets]: Incomplete configuration, see README");
+        return 0;
+    }
 
     ## Check escalation sets:
-    my %escalationSets = RT->Config->Get('EscalationSets');
-    unless (exists $escalationSets{$escalationSet}) {
-        $RT::Logger->error("Unable to find escalation set in config: $escalationSet");
+    unless (exists $config->{'EscalationSets'}->{$escalation_set}) {
+        RT::Logger->error("[RT::Extension::EscalationSets]: Unknown escalation set passed: '$escalation_set'");
         return 0;
     }
-
-    ## Check escalation actions:
-    my $escalationActions = RT->Config->Get('EscalationActions');
-    unless ($escalationActions) {
-        $RT::Logger->error('Config: No EscalationActions defined');
-        return 0;
-    }
-    
-
-    ## Check configured default escalation value:
-    # my $defaultPriority = RT->Config->Get('DefaultEscalationValue');
-    # unless (defined $defaultPriority) {
-    #     $RT::Logger->error('Config: DefaultEscalationValue not set.');
-    #     return 0;
-    # }
 
     ## Check configured Date::Manip:
     ## TODO This could throw 2 warnings:
@@ -106,37 +106,9 @@ sub Prepare {
     # my %dateConfig = RT->Config->Get('DateManipConfig');
     # ## TODO Does not work:
     # unless (%dateConfig) {
-    #     $RT::Logger->error('Config: Date::Manip\'s configuration not set.');
+    #     RT::Logger->error('Config: Date::Manip\'s configuration not set.');
     #     return 0;
     # }
-
-    ## Check custom field:
-    my $cfLvl = RT->Config->Get('EscalationField');
-    unless ($cfLvl) {
-        $RT::Logger->error('Config: EscalationField not set.');
-        return 0;
-    }
-
-    ## Validate custom field:
-    my $cf = RT::CustomField->new($RT::SystemUser);
-    $cf->LoadByName(Name => $cfLvl);
-    unless($cf->id) {
-        $RT::Logger->error(
-            'Custom field "' . $cfLvl . '" is unknown. Have you created it yet?'
-        );
-        return 0;
-    }
-
-    ## Validate custom field:
-    my $cfSet = RT->Config->Get('EscalationSetField') || "Escalation set";
-    $cf = RT::CustomField->new($RT::SystemUser);
-    $cf->LoadByName(Name => $cfSet);
-    unless($cf->id) {
-        $RT::Logger->error(
-            'Custom field "' . $cfSet . '" is unknown. Have you created it yet?'
-        );
-        return 0;
-    }
 
     return 1;
 }
@@ -151,484 +123,344 @@ After preparation this method commits the action.
 
 sub Commit {
     my $self = shift;
-    my $escalationSet = $self->Argument;
-
-    # Read configuration
-    my $cfLvl = RT->Config->Get('EscalationField');
-    my $cfSet = RT->Config->Get('EscalationSetField') || "Escalation set";
-    my $defaultLvl = RT->Config->Get('DefaultEscalationValue');
-    my %esets = RT->Config->Get('EscalationSets');
-    my $timezone = RT->Config->Get('Timezone') || 'UTC';
-
-    # Ticket fields
     my $ticket = $self->TicketObj;
-    my %ticketdate = (
-        'created' => $ticket->Created,
-        'due' => $ticket->Due,
-    );
-    my $lvl = $ticket->FirstCustomFieldValue($cfLvl);
-    my $set = $ticket->FirstCustomFieldValue($cfSet) || "";
+    my $timezone = RT->Config->Get('Timezone') || 'UTC';
+    my $config = $self->{'escalation_set_config'};
 
-    ## MySQL date time format:
-    my $format = '%Y-%m-%d %T';
 
-    ## UNIX timestamp 0:
-    my $notSet = '1970-01-01 00:00:00';
+    ## Do retrieve info from config and ticket
+    # CF
+    my $lvl_cf = $config->{'EscalationField'};
+    my $eset_cf = $config->{'EscalationSetField'};
 
-    ####
+    # Escalation set name
+    my $new_eset = $self->Argument; # already validated
+    my $old_eset = $ticket->FirstCustomFieldValue($eset_cf) || '';
 
-    $defaultLvl = "" unless (defined $defaultLvl);
-    $lvl = "" unless (defined $lvl);
-    my $newLvl = $lvl;
-    $newLvl = $defaultLvl if ($lvl eq "" && $defaultLvl ne "");
-
-    my $eset = $esets{$escalationSet};
-    if ($lvl ne $defaultLvl
-        && ! exists $eset->{$lvl}) 
-    {
-        $RT::Logger->warning("Ticket #" . $ticket->id . ": CF." . $cfLvl . " has unknown escalation level: " . $lvl);
+    # Retrieve eset definitions
+    my $new_eset_data = $config->{'EscalationSets'}->{$new_eset};
+    my $old_eset_data = $config->{'EscalationSets'}->{$old_eset}
+        if exists($config->{'EscalationSets'}->{$old_eset});
+        
+    unless($old_eset_data && $old_eset) {
+        RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . " has unknown escalation set: '$old_eset'");
     }
 
-    # Special values in escalation set
-    my %esetspecial = (
-        '_dueinterval' => $eset->{'_dueinterval'},
-    );
-    #delete $eset->{$_} for keys %esetspecial;
+    RT::Logger->debug(Dumper $new_eset_data);
+    RT::Logger->debug(Dumper $old_eset_data);
 
-    my %ticketdateobj = ();
-    for (keys %ticketdate) {
-        $ticketdateobj{$_} = $self->newDateObj($ticketdate{$_}, $timezone);
+    # Default escalation level
+    my $default_lvl = $new_eset_data->{'_default_level'} 
+        if exists($new_eset_data->{'_default_level'}) || '';
+    my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf) || '';
+    
+    # Set new escalation level to the default if no level was set before
+    # If both are empty we imply that ticket was not passed
+    if ($old_lvl ne $default_lvl) {
+        $new_lvl = $default_lvl;
+        
+    } elsif ( ! $old_eset_data) {
+        RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": CF." . $lvl_cf . " has unknown escalation level: " . $old_lvl . '. Will be corrected');
+        $new_lvl = $default_lvl;
+        
+    # $new_lvl will be calculated later
+    } else {
+        $new_lvl = $old_lvl;
     }
 
-    # Update escalation set CF if necessary
-    if ($set ne $escalationSet)
+    # Retrieve data from old and new levels
+    my $old_level_data = $old_eset_data->{$old_lvl} 
+        if exists($old_eset_data->{$old_lvl});
+
+    # Retrieve (intervals) from config
+    my $old_due_conf = '';
+    if (exists($old_eset_data->{'_due'})) {
+        my @k = grep{ exists $old_eset_data->{'_due'}->{$_} } @ticket_date_attrs;
+        $old_due_conf = $old_eset_data->{'_due'}->{$k[0]};
+    }
+    my $new_due_conf = '';
+    if (exists($new_eset_data->{'_due'})) {
+        my @k = grep{ exists $new_eset_data->{'_due'}->{$_} } @ticket_date_attrs;
+        $new_due_conf = $new_eset_data->{'_due'}->{$k[0]};
+    }
+    
+
+    ## Update escalation set CF if necessary
+    if ($old_eset ne $new_eset)
     {
-        my ($res, $msg) = $ticket->AddCustomFieldValue(Field => $cfSet, Value => $escalationSet);
+        my ($res, $msg) = $ticket->AddCustomFieldValue(Field => $eset_cf, Value => $new_eset);
         if ($res) {
-            $RT::Logger->info("Ticket #" . $ticket->id . ": CF." . $cfSet . " changed " . $set . " -> " . $escalationSet);
+            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": CF." . $eset_cf . " changed " . $old_eset . " -> " . $new_eset);
         } else {
-            $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set CF." . $cfSet . ": " . $msg);
+            RT::Logger->error("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": unable to set CF." . $eset_cf . ": " . $msg);
+            return 0;
         }
     }
 
-    # Calculate new Due
-    ## If Due is empty or ticket escalation set has changed from previous check
-    if ($ticket->Due eq $notSet
-        || $set ne $escalationSet)
-    {
-        my $newDueObj = undef;
 
-        if (defined $esetspecial{'_dueinterval'}
-            && ref($esetspecial{'_dueinterval'}) eq 'HASH'
-            && exists($esetspecial{'_dueinterval'}->{'created'}))
-        {
-            my $lastDueUnsetTxn = $self->getLastDueUnsetTxn;
-            $newDueObj = $self->calculateDue($esetspecial{'_dueinterval'}->{'created'}, $lastDueUnsetTxn);
-
-            if ($set ne $escalationSet
-                && $newDueObj->printf($format) ne $notSet)
-            {
-                if ($ticket->Due eq $notSet 
-                    && ! defined $lastDueUnsetTxn) 
-                {
-                    # > Due is empty and has never set. 
-                    # Usually when escalation passes through ticket for the first time
-                    if ($set ne "") {
-                        $newDueObj = undef;
-                        $RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
-                    }
-                    if ($ticket->Created eq $notSet) {
-                        $newDueObj = undef;
-                        $RT::Logger->warning("Ticket #" . $ticket->id . ": Cannot calculate Due because Created is empty");   
-                    }
-                } elsif ($set ne "") {
-                    # Add the difference between new escalation set and old one to new Due value
-                    # Performs when escalation set has changed from previous check (ticket moves to another set)
-                    # Also both old and new sets must have _dueinterval parameter
-
-                    my $d1 = $ticketdateobj{'created'}->new_delta;
-                    $d1->parse($esetspecial{'_dueinterval'}->{'created'});
-
-                    if (exists($esets{$set})
-                        && ref($esets{$set}) eq 'HASH'
-                        && exists($esets{$set}->{'_dueinterval'})
-                        && ref($esets{$set}->{'_dueinterval'}) eq 'HASH'
-                        && exists($esets{$set}->{'_dueinterval'}->{'created'}))
-                    {
-                        # Calculate difference between _dueintervals in new escalation set and old one
-                        # Then add the result to Due
-                        my $d2 = $ticketdateobj{'created'}->new_delta;
-                        $d2->parse($esets{$set}->{'_dueinterval'}->{'created'});
-                        $newDueObj = $newDueObj->calc($d1->calc($d2, 1), 0);
-
-                    } else {
-                        $newDueObj = undef;
-                        $RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
-                    }
-                } else {
-                    # > previous escalation set is empty in any case (except first time pass)
-                    $newDueObj = undef;
-                    $RT::Logger->debug("Ticket #" . $ticket->id . ": Unknown previous escalation set and Due was touched sometime. Make no changes");
-                }
+    ## Calculate new Due value
+    my $new_due = $self->calculate_due(
+        $old_eset,
+        $old_due_conf,
+        $new_eset,
+        $new_due_conf,
+        $ticket,
+        $self->get_due_unset_txn
+    );
+    # Write new Due to the ticket
+    if (defined $new_due) {
+        my $s = RT::Extension::EscalationSets::dm_to_str($new_due, DATE_FORMAT);
+        if ($s ne $ticket->Due) {
+            my ($res, $msg) = $ticket->SetDue($s);
+            unless ($res) {
+                RT::Logger->error("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": unable to set Due: " . $msg);
+                return 0;
             }
-
-        } elsif ($ticket->Due ne $notSet) {
-            $newDueObj = new Date::Manip::Date;
-            $newDueObj->parse($notSet);
-
-            if ($set eq "") {
-                $newDueObj = undef;
-                $RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
-            }
-        }
-
-        if (defined $newDueObj) {
-            if ($newDueObj->printf($format) ne $notSet) {
-                $newDueObj->convert("UTC");
-            }
-            my $newdue = $newDueObj->printf($format);
-            if ($newdue ne $ticket->Due) {
-                my ($res, $msg) = $ticket->SetDue($newdue);
-                unless ($res) {
-                    $RT::Logger->error("Ticket #" . $ticket->id . ": unable to set Due: " . $msg);
-                    return 0;
-                }
-                $RT::Logger->info("Ticket #" . $ticket->id . ": Due set to " . $newdue);
-
-                $ticketdate{'due'} = $newdue;
-                $ticketdateobj{'due'} = $self->newDateObj($ticketdate{'due'}, $timezone);
-            }
+            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due set to " . $s);
         }
     }
 
+
+    ## Create some Date::Manip objects
+    # NOW
     my $now = new Date::Manip::Date;
     $now->parse('now');
-
-    # Create hash {lvl => Date::Manip::Date}
-    my %deadlineType = ();
-    my %expiredDates = ();
-    foreach my $l (keys %$eset) {
-        for (keys %ticketdate) {
-            if ($eset->{$l}->{$_} && ! defined $esetspecial{$l}) {
-                unless ($ticketdateobj{$_}->printf("%s")) { 
-                    #$RT::Logger->warning('Ticket #' . $ticket->id . ': ' . ucfirst $_ . ' is empty, but specified in escalation ' . $escalationSet . ':' . $l);
-                    next;
-                }
-                my $dlt = $ticketdateobj{$_}->new_delta();
-                my $res = $dlt->parse($eset->{$l}->{$_});
-                if ($res == 1) {
-                    $RT::Logger->error("Config: Cannot parse escalation time value '" . $eset->{$l} . "' in " . $escalationSet . ':' . $l);
-                    return 0;
-                }
-                $expiredDates{$l} = $ticketdateobj{$_}->calc($dlt);
-                $deadlineType{$l} = $_;
-            }
+    #
+    # Ticket date attributes
+    my %ticket_dates = map{ $_ => RT::Extension::EscalationSets::str_to_dm($ticket->_Value($_)) } @ticket_date_attrs;
+    #
+    # Create hash {lvl => Date::Manip::Date} for new escalation set
+    my %eset_expired_dates = ();
+    foreach my $l (keys %$new_eset_data) {
+        # Date attributes in level definition
+        my @lvl_attrs = grep{exists $new_eset_data->{$l}->{$_}} @ticket_date_attrs; 
+        if (scalar(@lvl_attrs) > 1) {
+            RT::Logger->notice('[RT::Extension::EscalationSets]: Escalation level $l in set $new_eset has multiple dates. Will be used: ' . $lvl_attrs[0]);
+        } elsif ( ! @lvl_attrs) {
+            RT::Logger->error('[RT::Extension::EscalationSets]: Escalation level $l in set $new_eset has no correct date name. Abort');
+            return 0;
         }
+        my $lvl_attr = $lvl_attrs[0];
+        
+        # No need to compare with unset value
+        unless ($ticket_dates->{$lvl_attr}->printf("%s")) {
+            next;
+        }
+        
+        my $dlt = $ticket_dates->{$lvl_attr}->new_delta();
+        my $res = $dlt->parse($new_eset_data->{$l}->{$lvl_attr});
+        if ($res == 1) {
+            RT::Logger->error("[RT::Extension::EscalationSets]: Config: Cannot parse escalation time value '" . $new_eset_data->{$l} . "' in " . $new_eset . ':' . $l);
+            return 0;
+        }
+        $eset_expired_dates{$l} = $ticket_dates->{$lvl_attr}->calc($dlt);
     }
 
-    # Determine whether its time to change escalation level CF
-    # Sort all escalation lvls by dates (only in past) desc
-    # The first element will contain escalation set ticket must have now
-    my @past = grep { $expiredDates{$_}->cmp($now) < 0 } 
-        sort { $expiredDates{$b}->cmp($expiredDates{$a}) }
-        keys %expiredDates;
-    # my @past = grep { $deltas{$_}->{'data'}->{'length'} < $nowDelta->{'data'}->{'length'} } # 
-    #     sort { $deltas{$b}->{'data'}->{'length'} <=> $deltas{$a}->{'data'}->{'length'} }    # Kostyli-kostyliki, cmp() not properly works
-    #     keys %deltas;
-    $newLvl = $past[0] || $newLvl;
+    ## Calculate new escalation level
+    # Sort all escalation lvls by dates (only in past) descending
+    # The first element will contain needed escalation set
+    my @past = grep { $eset_expired_dates{$_}->cmp($now) < 0 } 
+        sort { $eset_expired_dates{$b}->cmp($eset_expired_dates{$a}) }
+        keys %eset_expired_dates;
+    $new_lvl = $past[0] || $new_lvl;
 
-    if ($lvl ne $newLvl) {
-        my ($val, $msg) = $ticket->AddCustomFieldValue(Field => $cfLvl, Value => $newLvl);
-        unless ($val) {
-           $RT::Logger->error('Ticket #' . $ticket->id . ': could not set escalation level: ' . $msg);
-           return 0;
-        }
-        $RT::Logger->info("Ticket #" . $ticket->id . ': CF.' . $cfLvl . " changed " . $lvl . ' -> ' . $newLvl);
-
-        # Perform escalation
-        if ($newLvl ne $defaultLvl) {
-            my $dueIntervalObj = $ticketdateobj{'created'}->new_delta;
-            $dueIntervalObj->parse($esetspecial{'_dueinterval'}->{'created'});
-
-            # What to pass to templates
-            my %t = map { ucfirst $_  => $ticketdateobj{$_} } keys %ticketdate; # Date::Manip::Date objects: Created, Due
-            my %d = map { ucfirst $_ . 'Delta' => $now->calc($ticketdateobj{$_}, 1) } keys %ticketdate; #CreatedDelta, DueDelta
-            %t = (
-                'Ticket' => $ticket,
-                'EscalationLevel' => $newLvl,
-                'DeadlineType' => $deadlineType{$newLvl},
-                'DueInterval' => $dueIntervalObj,
-                %t,
-                %d
-            );
-            $self->{'templateArguments'} = \%t;
-
-            my %escActions = RT->Config->Get('EscalationActions');
-            $self->HandleActions($escActions{$newLvl}, $ticket);
+    ## Write escalation level if needed
+    if ($old_lvl ne $new_lvl) {
+        my ($val, $msg) = $ticket->AddCustomFieldValue(Field => $lvl_cf, Value => $new_lvl);
+        if ($val) {
+            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ': CF.' . $lvl_cf . " changed " . $old_lvl . ' -> ' . $new_lvl);
+        } else {
+            RT::Logger->error('[RT::Extension::EscalationSets]: Ticket #' . $ticket->id . ': could not set escalation level: ' . $msg);
+            return 0;
         }
 
     } else {
-        $RT::Logger->debug("Ticket #" . $ticket->id . ": escalation level not changed");
+        RT::Logger->debug("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": escalation level not changed");
     }
     return 1;
 }
 
-sub calculateDue {
+sub calculate_due {
     my $self = shift;
-    my $delta = shift; #string, i.e. "-3 minutes"
+    my $old_eset = shift; #string
+    my $old_due_delta = shift; #string
+    my $new_eset = shift; #string
+    my $new_due_delta = shift; #string
+    my $ticket = shift;
+    my $due_unset_txn = shift;
+
+    my $new_due = undef;
+
+    if ($ticket->Due eq NOT_SET
+        || $new_eset ne $old_eset)
+    {
+        if ($old_due_delta)
+        {
+            $new_due = $self->timeline_due($old_due_delta, $ticket, $due_unset_txn); #Due that would be with old eset
+
+            if ($new_eset ne $old_eset
+                && $new_due->printf("%s") != 0) # epoch != 0
+            {
+                if ($ticket->Due eq NOT_SET 
+                    && ! defined $due_unset_txn) 
+                {
+                    # > Due is empty and has never set. 
+                    # Usually when escalation passes through ticket for the first time
+                    if ($new_eset ne "") {
+                        $new_due = undef; #Do nothing
+                        RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
+                    }
+                    if ($ticket->Created eq NOT_SET) { # Something wrong
+                        $new_due = undef; #Do nothing
+                        RT::Logger->warning("Ticket #" . $ticket->id . ": Cannot calculate Due because Created is empty");   
+                    }
+
+                } elsif ($new_eset ne "") {
+
+                    # Add the difference between new escalation set and old one to new Due value
+                    # Performs when escalation set has changed from previous check (ticket moves to another set)
+                    # Also both old and new sets must have _dueinterval parameter
+                    if ($new_due_delta)
+                    {
+                        # Calculate difference between _dueintervals in new escalation set and old one
+                        # Then add the result to Due
+                        $new_due = $new_due->calc(
+                            $self->esets_delta($old_due_delta, $new_due_delta),
+                            0
+                        );
+
+                    } else {
+                        $new_due = undef; #Do nothing
+                        RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
+                    }
+
+                } else {
+                    # > previous escalation set is empty in any case (except first time pass)
+                    $new_due = undef; #Do nothing
+                    RT::Logger->debug("Ticket #" . $ticket->id . ": Unknown previous escalation set and Due was touched sometime. Make no changes");
+                }
+            }
+
+        } elsif ($ticket->Due ne NOT_SET) {
+            $new_due = new Date::Manip::Date;
+            $new_due->parse(NOT_SET); #Unset Due
+
+            if ($new_eset eq "") {
+                $new_due = undef; #Do nothing
+                RT::Logger->warning("Ticket #" . $ticket->id . ": Ticket spent unknown time in previous escalation set");
+            }
+        }
+    }
+    return $new_due;
+}
+
+sub timeline_due {
+    #Calculates Due based on config delta or last Due, excluding escalation set transitions
+
+    my $self = shift;
+    my $config_delta = shift; #string, i.e. "3 minutes"
+    my $ticket = shift;
     my $txn = shift; #Last Due unset transaction
 
     my $timezone = RT->Config->Get('Timezone');
-    my $ticket = $self->TicketObj;
 
     # NOW
-    my $nowObj = new Date::Manip::Date;
-    $nowObj->parse("now");
+    my $now = new Date::Manip::Date;
+    $now->parse("now");
 
-    ## UNIX timestamp 0:
-    my $notSet = '1970-01-01 00:00:00';
+    my $new_due = new Date::Manip::Date;
+    $new_due->config('setdate', 'zone,UTC');
+    $new_due->parse(NOT_SET);
 
-    ## MySQL date time format:
-    my $format = '%Y-%m-%d %T';
-
-    my $newDueObj = new Date::Manip::Date;
-    $newDueObj->config('setdate', 'zone,UTC');
-    $newDueObj->parse($notSet);
-
-    if ( ! defined $delta
-        || $delta eq "")
+    if ( ! defined $config_delta
+        || $config_delta eq "")
     {
-        return $newDueObj;
+        return $new_due;
     }
 
-    if ($ticket->Due ne $notSet) {
-        $newDueObj->parse($ticket->Due);
-    } elsif (defined $txn) { # Due based on last Due value
+    my $calc_base = $now->new_date();
+    my $delta = $calc_base->new_delta();
+    $delta->parse($config_delta);
+
+    if ($ticket->Due ne NOT_SET) {
+        $new_due->parse($ticket->Due);
+        return $new_due;
+
+    } elsif (defined $txn) {
+        # Based on last Due value (before as it was unset)
+
         # Calculate how much time left to Due when Due has unset last time
         # and write NOW+difference to Due
-        my $toldObj = $self->newDateObj($txn->OldValue, $timezone);
-        my $tcreatedObj = $self->newDateObj($txn->Created, $timezone);
-        my $deltaObj = $toldObj->calc($tcreatedObj, 1);
 
         if ($txn->OldValue gt $txn->Created) {
-            $newDueObj = $nowObj->calc($deltaObj, 0);
+            my $txn_old = $self->str_to_dm($txn->OldValue, $timezone);
+            my $txn_created = $self->str_to_dm($txn->Created, $timezone);
+            $delta = $txn_old->calc($txn_created, 1);
+
         } else { # Out of SLA
-            $newDueObj->parse($txn->OldValue);
+            $delta = undef;
+            $new_due->parse($txn->OldValue);
+            return $new_due;
         }
 
     } else { # Due based on config
-        return $newDueObj if $ticket->Created eq $notSet;
+        return undef if $ticket->Created eq NOT_SET; # Something wrong
 
-        my $td = $self->newDateObj($ticket->Created, $timezone);
-        my $dueIntervalObj = $td->new_delta() ;
-        $dueIntervalObj->parse($delta);
-        $newDueObj = $td->calc($dueIntervalObj, 0);
+        $calc_base = $self->str_to_dm($ticket->Created, $timezone);
+        $delta = $calc_base->new_delta();
+        $delta->parse($config_delta);
     }
     
-    return $newDueObj;
+    $new_due = $calc_base->calc($delta, 0);
+
+    return $new_due;
 }
 
-sub getLastDueUnsetTxn {
+sub esets_delta {
+    my $self = shift;
+    my $old_due = shift;
+    my $new_due = shift;
+
+    # NOW
+    my $now = new Date::Manip::Date;
+    $now->parse("now");
+
+    my $old_delta = $now->new_delta()->parse($old_due);
+    my $new_delta = $now->new_delta()->parse($new_due);
+    return $new_delta->calc($old_delta, 1); # Date::Manip::Delta
+}
+
+#sub date_delta_calc {
+#    my $self = shift;
+#    my $date = shift; # Date::Manip::Date obj
+#    my $delta = shift; # string, for example "-3 minutes"
+#    my $subtract = shift || 0;
+#
+#    my $delta_obj = $date->new_delta();
+#    $delta_obj->parse($delta);
+#    my $new_date = $date->new_date();
+#    return $new_date->calc($delta_obj, $subtract);
+#}
+
+sub get_due_unset_txn {
     my $self = shift;
 
     my $ticket = $self->TicketObj;
-
-    ## UNIX timestamp 0:   
-    my $notSet = '1970-01-01 00:00:00';
 
     my $txns = $ticket->Transactions;
     $txns->Limit(FIELD => 'Type', VALUE => 'Set', SUBCLAUSE => 'startschange');
     $txns->Limit(FIELD => 'Field', VALUE => 'Due', ENTRYAGGREGATOR => 'AND');
-    $txns->Limit(FIELD => 'NewValue', VALUE => $notSet, ENTRYAGGREGATOR => 'AND');
+    $txns->Limit(FIELD => 'NewValue', VALUE => NOT_SET, ENTRYAGGREGATOR => 'AND');
     $txns->OrderBy(FIELD => 'id', ORDER => 'DESC');
     return $txns->First;
 }
 
-sub HandleActions {
-    my $self = shift;
-    my $actions = shift;
-    my $ticket = shift;
+#sub get_ticket_attr_dm {
+#    my ($self, $attr, $ticket) = @_;
+#    
+#    return (undef) unless ($ticket->_Accessible($attr, 'read'));
+#    return RT::Extension::EscalationSets::str_to_dm($ticket->_Value($attr));
+#}
 
-    my $ret = 1;
-
-    # Notify principals by email
-    if ($actions->{'notify'}) {
-        my $principals = $actions->{'notify'};
-        my $res = $self->SendEmail($principals);
-        unless ($res) {
-            $RT::Logger->error("Ticket #" . $ticket->id . ': unable to send notifications. Recipients: ' . join(',', @{$self->{'Emails'}}));
-            $ret = 0;
-        }
-        if ($res) {
-            $RT::Logger->info("Ticket #" . $ticket->id . ': Notifications successfully sended');
-        }
-    }
-
-    # Write comment in ticket
-    if ($actions->{'comment'}) {
-        my $res = $self->WriteComment($ticket);
-        unless ($res) {
-            $RT::Logger->error("Ticket #" . $ticket->id . ': Unable to write comment');
-            $ret = 0;
-        }
-        if ($res) {
-            $RT::Logger->info("Ticket #" . $ticket->id . ': Comment successfully wrote');
-        }
-    }
-    return $ret;
-}
-
-sub WriteComment {
-    my $self = shift;
-    my $ticket = shift;
-
-    my $ctpl = RT::Template->new($self->CurrentUser );
-    my $res = $ctpl->LoadGlobalTemplate('Escalation Comment');
-    unless ($res) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ': unable to load template Escalation Comment');
-        return 0;
-    }
-    my ($val, $msg) = $ctpl->Parse( %{ $self->{'templateArguments'} } );
-    unless ($val) {
-        $RT::Logger->error('Ticket #' . $ticket->id . ': could not parse Escalation Comment template: ' . $msg);
-        return 0;
-    }
-    my ($trid, $trmsg, $trobj) = $ticket->Comment(
-        MIMEObj => $ctpl->MIMEObj,
-        TimeTaken => 0,
-    );
-    unless ($trid) {
-        $RT::Logger->error("Ticket #" . $ticket->id . ': error while write comment: ' . $trmsg);
-        return 0;
-    }
-    return 1;
-}
-
-sub SendEmail {
-    my $self = shift;
-    my $principals = shift; # String: "user1,user2,group"
-
-    if ($principals) {
-        $self->SetRecipients($principals);
-        my $from = RT->Config->Get('CorrespondAddress');
-        my $configFrom = RT->Config->Get("EscalationEmailFrom");
-        $from = $configFrom if $configFrom;
-
-        my $res = RT::Interface::Email::SendEmailUsingTemplate(
-            'Template' => 'Escalation Email',
-            'Arguments' => $self->{'templateArguments'},
-            'To' => join(',', @{$self->{'Emails'}}),
-            'From' => $from
-        );
-        return abs($res);
-    }
-    return 0;
-}
-
-sub SetRecipients {
-    my $self = shift;
-
-    my $arg = shift;
-    foreach( $self->__SplitArg( $arg ) ) {
-        $self->_HandleArgument( $_ );
-    }
-
-    $self->{'seen_ueas'} = {};
-
-    return 1;
-}
-
-sub _HandleArgument {
-    my $self = shift;
-    my $instance = shift;
-
-    if ( $instance !~ /\D/ ) {
-        my $obj = RT::Principal->new( $self->CurrentUser );
-        $obj->Load( $instance );
-        return $self->_HandlePrincipal( $obj );
-    }
-
-    my $group = RT::Group->new( $self->CurrentUser );
-    $group->LoadUserDefinedGroup( $instance );
-    # to check disabled and so on
-    return $self->_HandlePrincipal( $group->PrincipalObj )
-        if $group->id;
-
-    require Email::Address;
-
-    my $user = RT::User->new( $self->CurrentUser );
-    if ( $instance =~ /^$Email::Address::addr_spec$/ ) {
-        $user->LoadByEmail( $instance );
-        return $self->__PushUserAddress( $instance )
-            unless $user->id;
-    } else {
-        $user->Load( $instance );
-    }
-    return $self->_HandlePrincipal( $user->PrincipalObj )
-        if $user->id;
-
-    $RT::Logger->error(
-        "'$instance' is not principal id, group name, user name,"
-        ." user email address or any email address"
-    );
-
-    return;
-}
-
-sub _HandlePrincipal {
-    my $self = shift;
-    my $obj = shift;
-    unless( $obj->id ) {
-        $RT::Logger->error( "Couldn't load principal #$obj" );
-        return;
-    }
-    if( $obj->Disabled ) {
-        $RT::Logger->info( "Principal #$obj is disabled => skip" );
-        return;
-    }
-    if( !$obj->PrincipalType ) {
-        $RT::Logger->crit( "Principal #$obj has empty type" );
-    } elsif( lc $obj->PrincipalType eq 'user' ) {
-        $self->__HandleUserArgument( $obj->Object );
-    } elsif( lc $obj->PrincipalType eq 'group' ) {
-        $self->__HandleGroupArgument( $obj->Object );
-    } else {
-        $RT::Logger->info( "Principal #$obj has unsupported type" );
-    }
-    return;
-}
-
-sub __HandleUserArgument {
-    my $self = shift;
-    my $obj = shift;
-    
-    my $uea = $obj->EmailAddress;
-    unless( $uea ) {
-        $RT::Logger->warning( "User #". $obj->id ." has no email address" );
-        return;
-    }
-    $self->__PushUserAddress( $uea );
-}
-
-sub __HandleGroupArgument {
-    my $self = shift;
-    my $obj = shift;
-
-    my $members = $obj->UserMembersObj;
-    while( my $m = $members->Next ) {
-        $self->__HandleUserArgument( $m );
-    }
-}
-
-sub __SplitArg {
-    return grep length, map {s/^\s+//; s/\s+$//; $_} split /,/, $_[1];
-}
-
-sub __PushUserAddress {
-    my $self = shift;
-    my $uea = shift;
-    push @{ $self->{'Emails'} }, $uea unless $self->{'seen_ueas'}{ $uea }++;
-    return;
-}
 
 1;

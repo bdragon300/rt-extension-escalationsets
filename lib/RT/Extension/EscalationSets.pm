@@ -4,7 +4,7 @@ use 5.010;
 use strict;
 use warnings;
 
-our $VERSION = '0.1';
+our $VERSION = '0.2';
 
 =head1 NAME
 
@@ -76,26 +76,49 @@ Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 =cut
 
 
-sub newDateObj {
-    my $self = shift;
+sub str_to_dm {
     my $val = shift;
     my $tz = shift;
 
     my $obj = new Date::Manip::Date;
-    $obj->config('setdate', 'zone,UTC');
+    $obj->config('setdate', 'zone,UTC')
+        if $tz;
     $obj->parse($val);
-    $obj->convert($tz);
+    $obj->convert($tz) 
+        if $tz;
 
     return $obj;
 }
 
-# This function exists because Date::Manip::Date::cmp sometimes not properly works
-sub cmpDates {
-    my $self = shift;
-    my $a = shift;
-    my $b = shift;
+sub dm_to_str {
+    my $dm = shift; #Date::Manip obj
+    my $format = shift;
+    
+    return $dm->printf($format) 
+        if $dm->printf("%s") eq '0';
+    my $obj = new Date::Manip::Date;
+    $obj->convert("UTC");
+    return $obj->printf($format);
+}
 
-    return ($a->printf("%s") cmp $b->printf("%s"));
+# This function exists because Date::Manip::Date::cmp sometimes not properly works
+#sub cmpDates {
+#    my $self = shift;
+#    my $a = shift;
+#    my $b = shift;
+#
+#    return ($a->printf("%s") cmp $b->printf("%s"));
+#}
+
+sub load_config {
+	my %conf = (
+	   EscalationField => RT->Config->Get('EscalationField'),
+	   EscalationSetField => RT->Config->Get('EscalationSetField'),
+	   EscalationSets => RT->Config->Get('EscalationSets')
+	);
+	return (undef) if (scalar(grep { ! $_ } values %conf));
+	return (undef) if ref($conf{'EscalationSets'}) ne 'HASH';
+    return \%conf;
 }
 
 1;
