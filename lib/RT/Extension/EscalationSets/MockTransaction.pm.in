@@ -1,0 +1,21 @@
+use strict;
+use warnings;
+
+package RT::Extension::EscalationSets::MockTransaction;
+
+use RT::Transaction;
+
+sub RT::Transaction::SetCreated
+{
+    my $self = shift;
+    $self->{'MockCreated'} = $_[0];
+}
+
+sub RT::Transaction::Created
+{
+    my $self = $_[0];
+    return $self->_Value('Created') unless exists($self->{'MockCreated'});
+    return $self->{'MockCreated'};
+}
+
+1;
