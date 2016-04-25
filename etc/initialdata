@@ -18,52 +18,36 @@ our @CustomFields = (
 );
 
 
-our @Templates = (
+our @Scrips = (
 {
-	Name        => 'Escalation Email',
-	Description => 'What will be send to email when escalation will occur',
-	Type        => 'Perl',
-	Queue       => 0,
-	Content     => <<'CONTENTS'
-Subject: Escalation #{$Ticket->id} {$EscalationLevel} level
-Content-Type: text/html; charset="UTF-8"
+    Description             =>  'Escalation 0 -> 1',
+    Queue                   =>  0,
+    ScripCondition          =>  'User Defined',
+    ScripAction             =>  'Notify AdminCcs as Comment',
+    Template                =>  'Blank',
+    CustomIsApplicableCode  =>  '
+# This Scrip executes when escalation level goes from $from to $to
+# If you want to create scrips for another levels then:
+# * Create new scrip
+# * Copy this code there to "Custom Condition"
+# * Set necessary $from and $to variables value
+# * Select "UserDefined" in Condition
+# * Select necessary "Action" and "Template"
 
-<p>Ticket <a href="{RT->Config->Get("WebURL")}Ticket/Display.html?id={$Ticket->id}">#{$Ticket->id}</a> was escalated to {$EscalationLevel} level. {
-if ($DeadlineType eq "created") { 
-    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
-}
-elsif ($DeadlineType eq "starts") {
-    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
-} 
-elsif ($DeadlineType eq "due") {
-    $t = $DueInterval->calc($DueDelta);
-    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
-}
-$x}.</p>
-CONTENTS
+my $from = "0";
+my $to = "1";
 
-},
+return 0 unless (
+$self->TransactionObj->Type eq "CustomField" 
+&& $self->TransactionObj->ReferenceType eq "RT::ObjectCustomFieldValue" 
+&& $self->TicketObj->LoadCustomFieldByIdentifier(RT->Config->Get("EscalationField"))->id eq $self->TransactionObj->Field
+);
 
-{
-	Name        => 'Escalation Comment',
-	Description => 'What will be left as comment when escalation will occur',
-	Type        => 'Perl',
-	Queue       => 0,
-	Content     => <<'CONTENTS'
-
-Ticket #{$Ticket->id} was escalated to {$EscalationLevel} level. {
-if ($DeadlineType eq "created") { 
-    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
-}
-elsif ($DeadlineType eq "starts") {
-    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
-} 
-elsif ($DeadlineType eq "due") {
-    $t = $DueInterval->calc($DueDelta);
-    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
-}
-$x}.
-CONTENTS
-
+my $old = ($from eq "" && ! $self->TransactionObj->OldReference);
+$old ||= ($self->TransactionObj->OldReference && $self->TransactionObj->OldReferenceObject->Content eq $from);
+my $new = ($to eq "" && ! $self->TransactionObj->NewReference);
+$new ||= ($self->TransactionObj->NewReference && $self->TransactionObj->NewReferenceObject->Content eq $to);
+$new && $old;
+'
 }
 );
