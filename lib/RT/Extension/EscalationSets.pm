@@ -75,29 +75,18 @@ Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
 =cut
 
-
-sub str_to_dm {
-    my $val = shift;
-    my $tz = shift;
-
-    my $obj = new Date::Manip::Date;
-    $obj->config('setdate', 'zone,UTC')
-        if $tz;
-    $obj->parse($val);
-    $obj->convert($tz) 
-        if $tz;
-
-    return $obj;
-}
-
 sub dm_to_str {
     my $dm = shift; #Date::Manip obj
     my $format = shift;
+    my $tz = shift;
     
     return $dm->printf($format) 
         if $dm->printf("%s") eq '0';
     my $obj = new Date::Manip::Date;
-    $obj->convert("UTC");
+    $obj->parse($dm->printf('%Y-%m-%d %T'));
+    $obj->convert($tz) 
+        if $tz;
+        
     return $obj->printf($format);
 }
 
@@ -114,7 +103,7 @@ sub load_config {
 	my %conf = (
 	   EscalationField => RT->Config->Get('EscalationField'),
 	   EscalationSetField => RT->Config->Get('EscalationSetField'),
-	   EscalationSets => RT->Config->Get('EscalationSets')
+	   EscalationSets => {RT->Config->Get('EscalationSets')}
 	);
 	return (undef) if (scalar(grep { ! $_ } values %conf));
 	return (undef) if ref($conf{'EscalationSets'}) ne 'HASH';
