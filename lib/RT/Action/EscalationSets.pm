@@ -122,6 +122,7 @@ After preparation this method commits the action.
 
 =cut
 
+#TODO: huge Commit function, need to be refactored
 sub Commit {
     my $self = shift;
     my $ticket = $self->TicketObj;
@@ -139,17 +140,17 @@ sub Commit {
     my $old_eset = $ticket->FirstCustomFieldValue($eset_cf) || '';
 
     # Retrieve eset definitions
-    my $new_eset_data = $config->{'EscalationSets'}->{$new_eset};
-    my $old_eset_data = $config->{'EscalationSets'}->{$old_eset}
+    my %eset_data = ($new_eset => $config->{'EscalationSets'}->{$new_eset});
+    $eset_data{$old_eset} = $config->{'EscalationSets'}->{$old_eset}
         if exists($config->{'EscalationSets'}->{$old_eset});
         
-    if ( ! $old_eset_data && $old_eset) {
+    if ( ! $eset_data{$old_eset} && $old_eset) {
         RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . " has unknown escalation set: '$old_eset'");
     }
 
     # Default escalation level
-    my $default_lvl = $new_eset_data->{'_default_level'} 
-        if exists($new_eset_data->{'_default_level'}) || '';
+    my $default_lvl = $eset_data{$new_eset}->{'_default_level'} 
+        if exists($eset_data{$new_eset}->{'_default_level'}) || '';
     my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf);
     $old_lvl = '' unless defined $old_lvl;
     if ( ! defined($default_lvl)) {
@@ -163,7 +164,7 @@ sub Commit {
     if ($old_lvl ne $default_lvl) {
         $new_lvl = $default_lvl;
         
-    } elsif ( ! $old_eset_data) {
+    } elsif ( ! $eset_data{$old_eset}) {
         RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": CF." . $lvl_cf . " has unknown escalation level: " . $old_lvl . '. Will be corrected');
         $new_lvl = $default_lvl;
         
@@ -173,29 +174,38 @@ sub Commit {
     }
 
     # Retrieve data from old and new levels
-    my $old_level_data = $old_eset_data->{$old_lvl} 
-        if exists($old_eset_data->{$old_lvl});
+    my %level_data = ($old_lvl => $eset_data{$old_eset}->{$old_lvl})
+        if exists($eset_data{$old_eset}->{$old_lvl});
 
     # Retrieve (intervals) from config
-    my $old_due_conf = '';
-    if (exists($old_eset_data->{'_due'})) {
-        my @k = grep{ exists $old_eset_data->{'_due'}->{$_} } @ticket_date_attrs;
+    my %conf_due = ();
+    if (exists($eset_data{$old_eset}->{'_due'})) {
+        my @k = grep{ exists $eset_data{$old_eset}->{'_due'}->{$_} } @ticket_date_attrs;
         unless(@k) {
             RT::Logger->error("[RT::Extension::EscalationSets]: No suitable dates found in _due in level $old_lvl in set $old_eset");
             return 0;
         }
-        $old_due_conf = $old_eset_data->{'_due'}->{$k[0]};
+        $conf_due{$old_eset} = {
+            Value => $eset_data{$old_eset}->{'_due'}->{$k[0]},
+            Attribute => $k[0]
+        };
+    } else {
+        $conf_due{$old_eset} = { Value => '' };
     }
-    my $new_due_conf = '';
-    if (exists($new_eset_data->{'_due'})) {
-        my @k = grep{ exists $new_eset_data->{'_due'}->{$_} } @ticket_date_attrs;
+    if (exists($eset_data{$new_eset}->{'_due'})) {
+        my @k = grep{ exists $eset_data{$new_eset}->{'_due'}->{$_} } @ticket_date_attrs;
         unless(@k) {
             RT::Logger->error("[RT::Extension::EscalationSets]: No suitable dates found in _due in level $new_lvl in set $new_eset");
+            return 0;
         }
-        $new_due_conf = $new_eset_data->{'_due'}->{$k[0]};
+        $conf_due{$new_eset} = {
+            Value => $eset_data{$new_eset}->{'_due'}->{$k[0]},
+            Attribute => $k[0]
+        };
+    } else {
+        $conf_due{$new_eset} = { Value => '' };
     }
     
-
     ## Update escalation set CF if necessary
     if ($old_eset ne $new_eset)
     {
@@ -208,24 +218,24 @@ sub Commit {
         }
     }
 
-
     ## Create some Date::Manip objects
     # NOW
     my $now = $self->str_to_dm('now', 'MSK', 'UTC');
 
+    ## Calculate new Due value
     my $new_due = $self->timeline_due(
-        $old_due_conf || $new_due_conf,
+        $conf_due{$old_eset}->{'Value'} || $conf_due{$new_eset}->{'Value'},
         $ticket,
         $self->get_due_unset_txn,
         $now
     );
-
-    ## Calculate new Due value
-    if ($old_due_conf ne $new_due_conf) {
+    # Possible correct Due while changing escalation set
+    if ($conf_due{$old_eset}->{'Value'} ne $conf_due{$new_eset}->{'Value'} )
+    {
         $new_due = $self->eset_change_due(
             $new_due,
-            $old_due_conf,
-            $new_due_conf,
+            $conf_due{$old_eset}->{'Value'},
+            $conf_due{$new_eset}->{'Value'},
             $ticket,
             $now
         );
@@ -243,17 +253,29 @@ sub Commit {
             RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due set to " . $new_due->printf("%u"));
         }
     }
+    
 
-    ## Create some Date::Manip objects
     # Ticket date attributes
-    my %ticket_dates = map{ $_ => $self->str_to_dm($ticket->_Value($_)) } @ticket_date_attrs;
+    my %ticket_dates = map{ $_ => ($self->str_to_dm( $ticket->_Value($_) || NOT_SET )) } @ticket_date_attrs;
+    my %ticket_deltas = map{ $_ => $ticket_dates{$_}->calc($now, 1) } 
+        grep{ defined($ticket->_Value($_)) && $ticket->_Value($_) ne NOT_SET }
+        @ticket_date_attrs;
+    
+    #Make dates and deltas objects available in template
+    $ticket->{'DateManipDates'} = \%ticket_dates;
+    $ticket->{'DateManipDeltas'} = \%ticket_deltas;
+    $ticket_deltas{'PrevInWork'} = exists($conf_due{$old_eset}->{'Attribute'})
+        && $ticket_dates{'Due'}->calc($ticket_dates{$conf_due{$old_eset}->{'Attribute'}}, 1);
+    $ticket_deltas{'CurrInWork'} = exists($conf_due{$new_eset}->{'Attribute'})
+        && $ticket_dates{'Due'}->calc($ticket_dates{$conf_due{$new_eset}->{'Attribute'}}, 1);
+
     #
     # Create hash {lvl => Date::Manip::Date} for new escalation set
     my %eset_expired_dates = ();
-    foreach my $l (keys %$new_eset_data) {
+    foreach my $l (keys %{$eset_data{$new_eset}}) {
         next if $l =~ /^_/;
         # Date attributes in level definition
-        my @lvl_attrs = grep{ ref($new_eset_data->{$l}) eq 'HASH' && exists($new_eset_data->{$l}->{$_}) } @ticket_date_attrs;
+        my @lvl_attrs = grep{ ref($eset_data{$new_eset}->{$l}) eq 'HASH' && exists($eset_data{$new_eset}->{$l}->{$_}) } @ticket_date_attrs;
         if (scalar(@lvl_attrs) > 1) {
             RT::Logger->notice("[RT::Extension::EscalationSets]: Escalation level $l in set $new_eset has multiple dates. Will be used: " . $lvl_attrs[0]);
         } elsif ( ! @lvl_attrs) {
@@ -268,9 +290,9 @@ sub Commit {
         }
         
         my $dlt = $ticket_dates{$lvl_attr}->new_delta();
-        my $res = $dlt->parse($new_eset_data->{$l}->{$lvl_attr});
+        my $res = $dlt->parse($eset_data{$new_eset}->{$l}->{$lvl_attr});
         if ($res == 1) {
-            RT::Logger->error("[RT::Extension::EscalationSets]: Config: Cannot parse escalation time value '" . $new_eset_data->{$l} . "' in " . $new_eset . ':' . $l);
+            RT::Logger->error("[RT::Extension::EscalationSets]: Config: Cannot parse escalation time value '" . $eset_data{$new_eset}->{$l} . "' in " . $new_eset . ':' . $l);
             return 0;
         }
         $eset_expired_dates{$l} = $ticket_dates{$lvl_attr}->calc($dlt);
@@ -298,6 +320,10 @@ sub Commit {
     } else {
         RT::Logger->debug("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": escalation level not changed");
     }
+    
+    undef $ticket->{'DateManipDates'};
+    undef $ticket->{'DateManipDeltas'};
+    
     return 1;
 }
 
