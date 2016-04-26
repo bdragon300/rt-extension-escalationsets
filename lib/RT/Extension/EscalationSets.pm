@@ -90,6 +90,20 @@ sub dm_to_str {
     return $obj->printf($format);
 }
 
+sub str_to_dm {
+    my $val = shift;
+    my ($from_tz, $to_tz) = ('UTC', '', @_);
+
+    my $obj = new Date::Manip::Date;
+    $obj->config('setdate', "zone,$from_tz")
+        if $from_tz;
+    $obj->parse($val);
+    $obj->convert($to_tz) 
+        if $to_tz;
+
+    return $obj;
+}
+
 # This function exists because Date::Manip::Date::cmp sometimes not properly works
 #sub cmpDates {
 #    my $self = shift;

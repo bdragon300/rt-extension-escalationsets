@@ -220,7 +220,7 @@ sub Commit {
 
     ## Create some Date::Manip objects
     # NOW
-    my $now = $self->str_to_dm('now', 'MSK', 'UTC');
+    my $now = RT::Extension::EscalationSets::str_to_dm('now', 'MSK', 'UTC');
 
     ## Calculate new Due value
     my $new_due = $self->timeline_due(
@@ -256,7 +256,7 @@ sub Commit {
     
 
     # Ticket date attributes
-    my %ticket_dates = map{ $_ => ($self->str_to_dm( $ticket->_Value($_) || NOT_SET )) } @ticket_date_attrs;
+    my %ticket_dates = map{ $_ => (RT::Extension::EscalationSets::str_to_dm( $ticket->_Value($_) || NOT_SET )) } @ticket_date_attrs;
     my %ticket_deltas = map{ $_ => $ticket_dates{$_}->calc($now, 1) } 
         grep{ defined($ticket->_Value($_)) && $ticket->_Value($_) ne NOT_SET }
         @ticket_date_attrs;
@@ -387,12 +387,12 @@ sub timeline_due {
     $new_due->parse(NOT_SET);
 
     unless ($config_delta) {
-        $new_due = $self->str_to_dm($ticket->Due);
+        $new_due = RT::Extension::EscalationSets::str_to_dm($ticket->Due);
         return $new_due;        
     }
 
     my $calc_base = $now->new();
-    $calc_base = $self->str_to_dm($now->printf(DATE_FORMAT));
+    $calc_base = RT::Extension::EscalationSets::str_to_dm($now->printf(DATE_FORMAT));
     my $delta = $calc_base->new_delta();
     $delta->parse($config_delta);
 
@@ -407,8 +407,8 @@ sub timeline_due {
         # and return NOW+difference
 
         if ($txn->OldValue gt $txn->Created) {
-            my $txn_old = $self->str_to_dm($txn->OldValue);
-            my $txn_created = $self->str_to_dm($txn->Created);
+            my $txn_old = RT::Extension::EscalationSets::str_to_dm($txn->OldValue);
+            my $txn_created = RT::Extension::EscalationSets::str_to_dm($txn->Created);
             $delta = $txn_old->calc($txn_created, 1);
 
         } else { # Out of SLA
@@ -420,7 +420,7 @@ sub timeline_due {
     } else { # Due based on config
         return undef if $ticket->Created eq NOT_SET; # Something wrong
 
-        $calc_base = $self->str_to_dm($ticket->Created);
+        $calc_base = RT::Extension::EscalationSets::str_to_dm($ticket->Created);
         $delta = $calc_base->new_delta();
         $delta->parse($config_delta);
     }
@@ -468,21 +468,6 @@ sub get_due_unset_txn {
     $txns->Limit(FIELD => 'NewValue', VALUE => NOT_SET, ENTRYAGGREGATOR => 'AND');
     $txns->OrderBy(FIELD => 'id', ORDER => 'DESC');
     return $txns->First;
-}
-
-sub str_to_dm {
-    my $self = shift;
-    my $val = shift;
-    my ($from_tz, $to_tz) = ('UTC', '', @_);
-
-    my $obj = new Date::Manip::Date;
-    $obj->config('setdate', "zone,$from_tz")
-        if $from_tz;
-    $obj->parse($val);
-    $obj->convert($to_tz) 
-        if $to_tz;
-
-    return $obj;
 }
 
 #sub get_ticket_attr_dm {
