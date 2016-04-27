@@ -329,10 +329,10 @@ sub eset_change_due {
 
         unless ($new_due_delta) {
             $due->parse(NOT_SET);
-            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is not set when going out of escalation by some reason.")
+            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is not set when going out of escalation by some reason.");
         }        
         elsif ($old_due_delta && $new_due_delta ne $old_due_delta) {
-            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is unset when changing escalation set. Cannot calculate Due.")
+            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is unset when changing escalation set.");
         }
 
         
@@ -340,7 +340,7 @@ sub eset_change_due {
         
         unless ($old_due_delta) {
             $due = undef;
-            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is set on ticket with no escalation set. Cannot calculate Due.")
+            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": Due is set on ticket with no escalation set. Cannot calculate Due.");
         }
         unless ($new_due_delta) {
             $due->parse(NOT_SET);
