@@ -94,22 +94,10 @@ sub Prepare {
         return 0;
     }
 
-    ## Check escalation sets:
     unless (exists $config->{'EscalationSets'}->{$escalation_set}) {
         RT::Logger->error("[RT::Extension::EscalationSets]: Unknown escalation set passed: '$escalation_set'");
         return 0;
     }
-
-    ## Check configured Date::Manip:
-    ## TODO This could throw 2 warnings:
-    ## 'Odd number of elements in hash assignment…' and
-    ## 'Use of uninitialized value in list assignment…'
-    # my %dateConfig = RT->Config->Get('DateManipConfig');
-    # ## TODO Does not work:
-    # unless (%dateConfig) {
-    #     RT::Logger->error('Config: Date::Manip\'s configuration not set.');
-    #     return 0;
-    # }
 
     return 1;
 }
@@ -220,7 +208,7 @@ sub Commit {
 
     ## Create some Date::Manip objects
     # NOW
-    my $now = RT::Extension::EscalationSets::str_to_dm('now', 'MSK', 'UTC');
+    my $now = RT::Extension::EscalationSets::str_to_dm(Val => 'now', ToTz => 'UTC');
 
     ## Calculate new Due value
     my $new_due = $self->timeline_due(
@@ -256,7 +244,8 @@ sub Commit {
     
 
     # Ticket date attributes
-    my %ticket_dates = map{ $_ => (RT::Extension::EscalationSets::str_to_dm( $ticket->_Value($_) || NOT_SET )) } @ticket_date_attrs;
+    my %ticket_dates = map{ $_ => (RT::Extension::EscalationSets::str_to_dm( Val => ($ticket->_Value($_) || NOT_SET ), FromTz => 'UTC' )) } 
+        @ticket_date_attrs;
 #    my %ticket_deltas = map{ $_ => $ticket_dates{$_}->calc($now, 1) } 
 #        grep{ defined($ticket->_Value($_)) && $ticket->_Value($_) ne NOT_SET }
 #        @ticket_date_attrs;
@@ -371,17 +360,15 @@ sub timeline_due {
 
     my $timezone = RT->Config->Get('Timezone');
 
-    my $new_due = new Date::Manip::Date;
-    $new_due->config('setdate', 'zone,UTC');
-    $new_due->parse(NOT_SET);
+    my $new_due = RT::Extension::EscalationSets::str_to_dm(Val => NOT_SET, FromTz => 'UTC');
 
     unless ($config_delta) {
-        $new_due = RT::Extension::EscalationSets::str_to_dm($ticket->Due);
+        $new_due = RT::Extension::EscalationSets::str_to_dm(Val => $ticket->Due, FromTz => 'UTC');
         return $new_due;        
     }
 
     my $calc_base = $now->new();
-    $calc_base = RT::Extension::EscalationSets::str_to_dm($now->printf(DATE_FORMAT));
+    $calc_base = RT::Extension::EscalationSets::str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC');
     my $delta = $calc_base->new_delta();
     $delta->parse($config_delta);
 
@@ -396,8 +383,8 @@ sub timeline_due {
         # and return NOW+difference
 
         if ($txn->OldValue gt $txn->Created) {
-            my $txn_old = RT::Extension::EscalationSets::str_to_dm($txn->OldValue);
-            my $txn_created = RT::Extension::EscalationSets::str_to_dm($txn->Created);
+            my $txn_old = RT::Extension::EscalationSets::str_to_dm(Val => $txn->OldValue, FromTz => 'UTC');
+            my $txn_created = RT::Extension::EscalationSets::str_to_dm(Val => $txn->Created, FromTz => 'UTC');
             $delta = $txn_old->calc($txn_created, 1);
 
         } else { # Out of SLA
@@ -409,7 +396,7 @@ sub timeline_due {
     } else { # Due based on config
         return undef if $ticket->Created eq NOT_SET; # Something wrong
 
-        $calc_base = RT::Extension::EscalationSets::str_to_dm($ticket->Created);
+        $calc_base = RT::Extension::EscalationSets::str_to_dm(Val => $ticket->Created, FromTz => 'UTC');
         $delta = $calc_base->new_delta();
         $delta->parse($config_delta);
     }

@@ -53,10 +53,10 @@ sub new_ticket()
 my $ac = new RT::Action::EscalationSets;
 
 # Now 
-my $now = RT::Extension::EscalationSets::str_to_dm('now', '', 'UTC');
+my $now = RT::Extension::EscalationSets::str_to_dm(Val => 'now', ToTz => 'UTC');
 
 #Not set object
-my $not_set = RT::Extension::EscalationSets::str_to_dm(NOT_SET, 'UTC');
+my $not_set = RT::Extension::EscalationSets::str_to_dm(NOT_SET, FromTz => 'UTC');
 
 my ( $baseurl, $m ) = RT::Test->started_ok();
 

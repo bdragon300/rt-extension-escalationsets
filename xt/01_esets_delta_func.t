@@ -19,8 +19,7 @@ use_ok('RT::Action::EscalationSets');
 use_ok('Date::Manip::Date');
 
 # Now 
-my $now = new Date::Manip::Date;
-$now->parse('now');
+my $now = RT::Extension::EscalationSets::str_to_dm(Val => 'now', ToTz => 'UTC');
 
 my $ac = new RT::Action::EscalationSets;
 

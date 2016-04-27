@@ -97,15 +97,29 @@ sub dm_to_str {
 }
 
 sub str_to_dm {
-    my $val = shift;
-    my ($from_tz, $to_tz) = ('UTC', '', @_);
+    my %args = (
+        Val     => undef,
+        FromTz  => undef,
+        ToTz    => undef,
+        Config  => undef,
+        @_
+    );
+
+    return (undef) 
+        unless $args{'Val'};
 
     my $obj = new Date::Manip::Date;
-    $obj->config('setdate', "zone,$from_tz")
-        if $from_tz;
-    $obj->parse($val);
-    $obj->convert($to_tz) 
-        if $to_tz;
+    
+    map{ $obj->config($_, $args{'Config'}->{$_}) }
+        keys %{$args{'Config'}} 
+        if $args{'Config'};
+    $obj->config('setdate', "zone," . $args{'FromTz'})
+        if $args{'FromTz'};
+        
+    $obj->parse($args{'Val'});
+    
+    $obj->convert($args{'ToTz'}) 
+        if $args{'ToTz'};
 
     return $obj;
 }
@@ -143,7 +157,7 @@ sub RT::Ticket::get_datemanip_delta
 {
     my $self = shift;
     my $field = shift;
-    my $base = shift // str_to_dm("now", "MSK", "UTC");
+    my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
     
     return (undef) unless $self->_Accessible($field, 'read');
     return (undef) unless defined($self->_Value($field));
@@ -169,7 +183,7 @@ sub RT::Ticket::get_datemanip_worktime
 
     # (Due-startdate)-NOW
     my $due_date = $self->get_datemanip_date('Due');
-    return (undef) unless $due_date;    
+    return (undef) unless $due_date;
     my $start_date = $self->get_datemanip_date($date_keys[0]);
     my $due_start_delta = $due_date->calc($start_date, 1);
     
