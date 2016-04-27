@@ -257,17 +257,9 @@ sub Commit {
 
     # Ticket date attributes
     my %ticket_dates = map{ $_ => (RT::Extension::EscalationSets::str_to_dm( $ticket->_Value($_) || NOT_SET )) } @ticket_date_attrs;
-    my %ticket_deltas = map{ $_ => $ticket_dates{$_}->calc($now, 1) } 
-        grep{ defined($ticket->_Value($_)) && $ticket->_Value($_) ne NOT_SET }
-        @ticket_date_attrs;
-    
-    #Make dates and deltas objects available in template
-    $ticket->{'DateManipDates'} = \%ticket_dates;
-    $ticket->{'DateManipDeltas'} = \%ticket_deltas;
-    $ticket_deltas{'PrevInWork'} = exists($conf_due{$old_eset}->{'Attribute'})
-        && $ticket_dates{'Due'}->calc($ticket_dates{$conf_due{$old_eset}->{'Attribute'}}, 1);
-    $ticket_deltas{'CurrInWork'} = exists($conf_due{$new_eset}->{'Attribute'})
-        && $ticket_dates{'Due'}->calc($ticket_dates{$conf_due{$new_eset}->{'Attribute'}}, 1);
+#    my %ticket_deltas = map{ $_ => $ticket_dates{$_}->calc($now, 1) } 
+#        grep{ defined($ticket->_Value($_)) && $ticket->_Value($_) ne NOT_SET }
+#        @ticket_date_attrs;
 
     #
     # Create hash {lvl => Date::Manip::Date} for new escalation set
@@ -320,9 +312,6 @@ sub Commit {
     } else {
         RT::Logger->debug("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id . ": escalation level not changed");
     }
-    
-    undef $ticket->{'DateManipDates'};
-    undef $ticket->{'DateManipDeltas'};
     
     return 1;
 }

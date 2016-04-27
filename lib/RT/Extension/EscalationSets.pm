@@ -6,6 +6,12 @@ use warnings;
 
 our $VERSION = '0.2';
 
+## UNIX timestamp 0:
+use constant NOT_SET => '1970-01-01 00:00:00';
+
+## MySQL date time format:
+use constant DATE_FORMAT => '%Y-%m-%d %T';
+
 =head1 NAME
 
 RT::Extension::EscalationSets - Different escalation rules (sets) 
@@ -122,6 +128,52 @@ sub load_config {
 	return (undef) if (scalar(grep { ! $_ } values %conf));
 	return (undef) if ref($conf{'EscalationSets'}) ne 'HASH';
     return \%conf;
+}
+
+sub RT::Ticket::get_datemanip_date
+{
+    my $self = shift;
+    my $field = shift;
+    
+    return (undef) unless $self->_Accessible($field, 'read');
+    return str_to_dm($self->_Value($field));
+}
+
+sub RT::Ticket::get_datemanip_delta
+{
+    my $self = shift;
+    my $field = shift;
+    my $base = shift // str_to_dm("now", "MSK", "UTC");
+    
+    return (undef) unless $self->_Accessible($field, 'read');
+    return (undef) unless defined($self->_Value($field));
+    my $f = str_to_dm($self->_Value($field));
+    return (undef) unless $f; 
+    return $f->calc($base, 1);
+}
+
+sub RT::Ticket::get_datemanip_worktime
+{
+    my $self = shift;
+    
+    return (undef) if $self->_Value('Due') eq NOT_SET;
+    
+    my $conf = load_config();
+    my $eset = $self->FirstCustomFieldValue($conf->{'EscalationSetField'});
+    return (undef) unless $eset;
+    
+    my @date_keys = keys %{$conf->{'EscalationSets'}->{$eset}->{_due}}
+        if (exists($conf->{'EscalationSets'}->{$eset}) && exists($conf->{'EscalationSets'}->{$eset}->{_due}));
+    return (undef) unless @date_keys;
+    return (undef) if ( ! $self->_Value($date_keys[0]) || $self->_Value($date_keys[0]) eq NOT_SET );
+
+    # (Due-startdate)-NOW
+    my $due_date = $self->get_datemanip_date('Due');
+    return (undef) unless $due_date;    
+    my $start_date = $self->get_datemanip_date($date_keys[0]);
+    my $due_start_delta = $due_date->calc($start_date, 1);
+    
+    return $due_start_delta->calc($self->get_datemanip_delta('Due'), 1);
 }
 
 1;
