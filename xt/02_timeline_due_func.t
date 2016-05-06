@@ -56,7 +56,7 @@ my $ac = new RT::Action::EscalationSets;
 my $now = RT::Extension::EscalationSets::str_to_dm(Val => 'now', ToTz => 'UTC');
 
 #Not set object
-my $not_set = RT::Extension::EscalationSets::str_to_dm(NOT_SET, FromTz => 'UTC');
+my $not_set = RT::Extension::EscalationSets::str_to_dm(Val => NOT_SET, FromTz => 'UTC');
 
 my ( $baseurl, $m ) = RT::Test->started_ok();
 
@@ -66,7 +66,7 @@ subtest 'Config delta is unset' => sub {
     $ticket->SetDue($check->printf(DATE_FORMAT));
     my $txn = undef;
     
-    my $res = $ac->timeline_due(undef, $ticket, $txn, $now);
+    my $res = $ac->timeline_due(undef, undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $check->printf(DATE_FORMAT), 'return current Due' );
 };
@@ -77,7 +77,7 @@ subtest 'Due set to something' => sub {
     $ticket->SetDue($check->printf(DATE_FORMAT));
     my $txn = undef;
     
-    my $res = $ac->timeline_due($test_due[0], $ticket, $txn, $now);
+    my $res = $ac->timeline_due($test_due[0], undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $check->printf(DATE_FORMAT), 'return current Due' );
 };
@@ -91,7 +91,7 @@ subtest 'Due was unset, Due was in future' => sub {
     my $txn = do_set_unset_due($ticket, $oldtxnval->printf(DATE_FORMAT));
     $txn->SetCreated($txncreated->printf(DATE_FORMAT));
     
-    my $res = $ac->timeline_due($test_due[0], $ticket, $txn, $now);
+    my $res = $ac->timeline_due($test_due[0], undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $check->printf(DATE_FORMAT), 'return NOW+(txn_val-txn_created)');
 };
@@ -104,7 +104,7 @@ subtest 'Due was unset, Due was in past' => sub {
     my $txn = do_set_unset_due($ticket, $oldtxnval->printf(DATE_FORMAT));
     $txn->SetCreated($txncreated->printf(DATE_FORMAT));
     
-    my $res = $ac->timeline_due($test_due[0], $ticket, $txn, $now);
+    my $res = $ac->timeline_due($test_due[0], undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $oldtxnval->printf(DATE_FORMAT), 'return txn_val');
 };
@@ -116,7 +116,7 @@ subtest 'Due was not unset, Due is unset now' => sub {
     my $check = increase_date($created, $test_due[0]);
     my $txn = undef;
     
-    my $res = $ac->timeline_due($test_due[0], $ticket, $txn, $now);
+    my $res = $ac->timeline_due($test_due[0], undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $check->printf(DATE_FORMAT), 'return ticket_created+config_due');
 };
@@ -130,7 +130,7 @@ subtest 'Due was unset, Due is set now to something' => sub {
     $txn->SetCreated($txncreated->printf(DATE_FORMAT));
     $ticket->SetDue($check->printf(DATE_FORMAT));
     
-    my $res = $ac->timeline_due($test_due[0], $ticket, $txn, $now);
+    my $res = $ac->timeline_due($test_due[0], undef, $ticket, $txn, $now);
     isnt($res, undef, 'return not undef');
     cmp_ok( $res->printf(DATE_FORMAT), 'eq', $ticket->Due, 'return ticket Due');
 };

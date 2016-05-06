@@ -26,11 +26,11 @@ my $ac = new RT::Action::EscalationSets;
 ##
 
 
-my $res = $ac->esets_delta('-2 minutes', '-2 minutes', $now);
+my $res = $ac->esets_business_delta('-2 minutes', '-2 minutes', $now);
 isnt($res, undef);
 ok( $res->value() eq '0:0:0:0:0:0:0', 'delta1==delta2 -> 0' );
 
-$res = $ac->esets_delta('-2 minutes', '3 minutes', $now);
+$res = $ac->esets_business_delta('-2 minutes', '3 minutes', $now);
 isnt($res, undef);
 ok( $res->value() eq '0:0:0:0:0:5:0', 'delta2=delta1+5minutes -> 5 minutes' );
 
