@@ -110,6 +110,7 @@ sub str_to_dm {
 
     my $obj = new Date::Manip::Date;
     
+    dm_set_default_config($obj);
     map{ $obj->config($_, $args{'Config'}->{$_}) }
         keys %{$args{'Config'}} 
         if $args{'Config'};
@@ -122,6 +123,17 @@ sub str_to_dm {
         if $args{'ToTz'};
 
     return $obj;
+}
+
+sub dm_set_default_config
+{
+    my $dmobj = shift;
+    
+    $dmobj->config('WorkDay24Hr',  1);
+    $dmobj->config('WorkDayBeg',  '00:00');
+    $dmobj->config('WorkDayEnd',  '24:00');
+    $dmobj->config('WorkWeekBeg',  1);
+    $dmobj->config('WorkWeekEnd',  7);
 }
 
 # This function exists because Date::Manip::Date::cmp sometimes not properly works
