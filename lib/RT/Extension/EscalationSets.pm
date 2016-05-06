@@ -4,7 +4,8 @@ use 5.010;
 use strict;
 use warnings;
 
-our $VERSION = '0.2';
+use Exporter 'import';
+our @EXPORT = qw/ str_to_dm  load_config /;
 
 ## UNIX timestamp 0:
 use constant NOT_SET => '1970-01-01 00:00:00';

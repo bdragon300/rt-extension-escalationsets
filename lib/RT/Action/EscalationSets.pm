@@ -9,9 +9,6 @@ use Date::Manip::Date;
 use RT::Interface::Email;
 use RT::Extension::EscalationSets;
 
-our $VERSION = '0.2';
-our $PACKAGE = __PACKAGE__;
-
 =head1 NAME
 
 C<RT::Action::EscalationSets> - Increment escalation custom field value based
@@ -88,7 +85,7 @@ sub Prepare {
     my $ticket = $self->TicketObj;
     my $escalation_set = $self->Argument;
     
-    my $config = $self->{'escalation_set_config'} ||= RT::Extension::EscalationSets::load_config();
+    my $config = $self->{'escalation_set_config'} ||= load_config();
     unless($config) {
         RT::Logger->error("[RT::Extension::EscalationSets]: Incomplete configuration, see README");
         return 0;
@@ -200,7 +197,7 @@ sub Commit {
         if ($old_eset ne $new_eset);
 
     # NOW Date::Manip obj
-    my $now = RT::Extension::EscalationSets::str_to_dm(Val => 'now', ToTz => 'UTC');
+    my $now = str_to_dm(Val => 'now', ToTz => 'UTC');
 
     ## Calculate new Due value
     # Has old eset config
@@ -239,7 +236,7 @@ sub Commit {
     
 
     # Ticket date attributes
-    my %ticket_dates = map{ $_ => (RT::Extension::EscalationSets::str_to_dm( Val => ($ticket->_Value($_) || NOT_SET ), FromTz => 'UTC' )) } 
+    my %ticket_dates = map{ $_ => (str_to_dm( Val => ($ticket->_Value($_) || NOT_SET ), FromTz => 'UTC' )) } 
         @ticket_date_attrs;
     map{ $_->config(%{$eset_data{$new_eset}->{'_datemanip_config'}}) }
         values %ticket_dates
@@ -304,18 +301,18 @@ sub timeline_due {
 
     my $timezone = RT->Config->Get('Timezone') // 'UTC';
 
-    my $new_due = RT::Extension::EscalationSets::str_to_dm(Val => NOT_SET, FromTz => 'UTC');
+    my $new_due = str_to_dm(Val => NOT_SET, FromTz => 'UTC');
     $new_due->config(%{$dm_config})
         if ref($dm_config) eq "HASH";
         
     unless ($config_delta) {
-        $new_due = RT::Extension::EscalationSets::str_to_dm(Val => $ticket->Due, FromTz => 'UTC');
+        $new_due = str_to_dm(Val => $ticket->Due, FromTz => 'UTC');
         $new_due->config(%{$dm_config})
             if ref($dm_config) eq "HASH";
-        return $new_due;        
+        return $new_due;
     }
 
-    my $calc_base = RT::Extension::EscalationSets::str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC');
+    my $calc_base = str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC');
     $calc_base->config(%{$dm_config})
         if ref($dm_config) eq "HASH";
         
@@ -329,8 +326,8 @@ sub timeline_due {
         # If ticket was not overdue
         # Due = Now + (Txn_due - Txn_created) 
         if ($txn->OldValue gt $txn->Created) {
-            my $txn_old = RT::Extension::EscalationSets::str_to_dm(Val => $txn->OldValue, FromTz => 'UTC');
-            my $txn_created = RT::Extension::EscalationSets::str_to_dm(Val => $txn->Created, FromTz => 'UTC');
+            my $txn_old = str_to_dm(Val => $txn->OldValue, FromTz => 'UTC');
+            my $txn_created = str_to_dm(Val => $txn->Created, FromTz => 'UTC');
             $delta = $txn_old->calc($txn_created, 1, 'business');
 
         # If ticket was overdue
