@@ -139,10 +139,10 @@ sub Commit {
     }
 
     # Default escalation level
-    my $default_lvl = $eset_data{$new_eset}->{'_default_level'}
-        if exists($eset_data{$new_eset}->{'_default_level'});
+    my $default_lvl = $eset_data{$new_eset}->{'default_level'}
+        if exists($eset_data{$new_eset}->{'default_level'});
     unless ( defined($default_lvl) ) {
-        RT::Logger->error("[RT::Extension::EscalationSets]: '_default_level' setting not found "
+        RT::Logger->error("[RT::Extension::EscalationSets]: 'default_level' setting not found "
             . "in escalation set '$new_eset'");
         return 0;
     }
@@ -150,7 +150,7 @@ sub Commit {
     # Old escalation level
     my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf) // '';
     if (exists($eset_data{$old_eset})
-        && ! exists($eset_data{$old_eset}->{$old_lvl})
+        && ! exists($eset_data{$old_eset}->{'levels'}->{$old_lvl})
         && $old_lvl ne ''
     ) {
         RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
@@ -162,20 +162,20 @@ sub Commit {
     my %conf_due = ();
     foreach my $eset (($old_eset, $new_eset)) {
 
-        unless (exists($eset_data{$eset}->{'_due'})) {
+        unless (exists($eset_data{$eset}->{'due'})) {
             $conf_due{$eset} = undef;
             next;
         }
 
-        my $date_key = (keys %{$eset_data{$eset}->{'_due'}})[0]
-            if ref($eset_data{$eset}->{'_due'}) eq 'HASH';
+        my $date_key = (keys %{$eset_data{$eset}->{'due'}})[0]
+            if ref($eset_data{$eset}->{'due'}) eq 'HASH';
         unless ($ticket->_Accessible($date_key, 'read')) {
             RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use _due date '$date_key' "
                 . "in set $eset");
             return 0;
         }
 
-        $conf_due{$eset} = $eset_data{$eset}->{'_due'}->{$date_key};
+        $conf_due{$eset} = $eset_data{$eset}->{'due'}->{$date_key};
     }
 
     #
@@ -197,19 +197,19 @@ sub Commit {
     ) {
         my $new_due = $self->timeline_due(
             $conf_due{$old_eset} || $conf_due{$new_eset},
-            $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'_datemanip_config'} || undef,
+            $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
             $self->get_due_unset_txn($ticket),
             $now,
             $ticket
         );
         # Possible correct Due if escalation set is changing
-        if ( $conf_due{$old_eset}->{'Value'} ne $conf_due{$new_eset}->{'Value'} )
+        if ( $conf_due{$old_eset} ne $conf_due{$new_eset} )
         {
             $new_due = $self->eset_change_due(
                 $new_due,
-                $conf_due{$old_eset}->{'Value'},
-                $conf_due{$new_eset}->{'Value'},
-                $eset_data{$new_eset}->{'_datemanip_config'} || undef,
+                $conf_due{$old_eset},
+                $conf_due{$new_eset},
+                $eset_data{$new_eset}->{'datemanip_config'} || undef,
                 $now,
                 $ticket
             );
@@ -236,8 +236,8 @@ sub Commit {
 
     # Returns hashref lvl=>expired_dm_obj or undef
     my $lvl = $self->get_lvl(
-        $eset_data{$new_eset},
-        $eset_data{$new_eset}->{'_datemanip_config'},
+        $eset_data{$new_eset}->{'levels'},
+        $eset_data{$new_eset}->{'datemanip_config'},
         $ticket
     );
     $lvl = (keys %$lvl)[0]
@@ -399,15 +399,13 @@ sub esets_business_delta {
 sub get_lvl
 {
     my $self = shift;
-    my $lvls = shift; # Hashref from config
+    my $lvls = shift; # Hashref 'levels'=> ... from config
     my $dm_config = shift;
     my $ticket = shift;
 
     my %recent = (); # lvl => expired_date
     foreach my $l (keys %$lvls) {
         my %ticket_dates;
-
-        next if $l =~ /^_/;
 
         # Get ticket date attribute in level config
         my $date_attr = (keys %{$lvls->{$l}})[0]
