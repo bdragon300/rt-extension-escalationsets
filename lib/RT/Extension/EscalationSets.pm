@@ -132,13 +132,41 @@ sub load_config {
     return \%conf;
 }
 
+sub get_current_eset
+{
+    my $ticket = shift;
+
+    my $config = load_config();
+    my $eset_cf = $config->{'EscalationSetField'};
+    undef $config;
+    return $ticket->FirstCustomFieldValue($eset_cf);
+}
+
+sub get_dm_config_by_eset
+{
+    my $eset = shift // 'current';
+
+    my $config = load_config();
+    $eset = get_current_eset($self)
+        if $eset eq 'current';
+    return $config->{$eset}->{'datemanip_config'}
+        if exists($config->{$eset});
+}
+
 sub RT::Ticket::get_datemanip_date
 {
     my $self = shift;
     my $field = shift;
+    my $eset = shift // 'current';
+
+    return (undef) 
+        unless $self->_Accessible($field, 'read');
     
-    return (undef) unless $self->_Accessible($field, 'read');
-    return str_to_dm($self->_Value($field));
+    return str_to_dm(
+        Val => $self->_Value($field),
+        FromTz => 'UTC',
+        Config => get_dm_config_by_eset($eset)
+    );
 }
 
 sub RT::Ticket::get_datemanip_delta
@@ -146,11 +174,21 @@ sub RT::Ticket::get_datemanip_delta
     my $self = shift;
     my $field = shift;
     my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
+    my $eset = shift // 'current';
     
-    return (undef) unless $self->_Accessible($field, 'read');
-    return (undef) unless defined($self->_Value($field));
-    my $f = str_to_dm($self->_Value($field));
-    return (undef) unless $f; 
+    return (undef)
+        unless $self->_Accessible($field, 'read');
+    return (undef)
+        unless defined($self->_Value($field));
+
+    my $f = str_to_dm(
+        Val => $self->_Value($field),
+        FromTz => 'UTC', 
+        Config => get_dm_config_by_eset($eset)
+    );
+    return (undef)
+        unless $f; 
+
     return $f->calc($base, 1);
 }
 
@@ -158,24 +196,30 @@ sub RT::Ticket::get_datemanip_worktime
 {
     my $self = shift;
     
-    return (undef) if $self->_Value('Due') eq NOT_SET;
+    return (undef)
+        if $self->_Value('Due') eq NOT_SET;
     
     my $conf = load_config();
-    my $eset = $self->FirstCustomFieldValue($conf->{'EscalationSetField'});
-    return (undef) unless $eset;
+    my $eset = get_current_eset($self);
     
-    my @date_keys = keys %{$conf->{'EscalationSets'}->{$eset}->{_due}}
-        if (exists($conf->{'EscalationSets'}->{$eset}) && exists($conf->{'EscalationSets'}->{$eset}->{_due}));
-    return (undef) unless @date_keys;
-    return (undef) if ( ! $self->_Value($date_keys[0]) || $self->_Value($date_keys[0]) eq NOT_SET );
+    my $due_date_attr = (keys %{$conf->{'EscalationSets'}->{$eset}->{'due'}})[0]
+        if ref($conf->{'EscalationSets'}->{$eset}->{'due'}) eq 'HASH';
+    return (undef)
+        unless $self->_Accessible($due_date_attr, 'read');
+    return (undef)
+        unless $self->_Value($due_date_attr);
+    return (undef) 
+        if $self->_Value($due_date_attr) eq NOT_SET;
 
-    # (Due-startdate)-NOW
-    my $due_date = $self->get_datemanip_date('Due');
-    return (undef) unless $due_date;
-    my $start_date = $self->get_datemanip_date($date_keys[0]);
-    my $due_start_delta = $due_date->calc($start_date, 1);
-    
-    return $due_start_delta->calc($self->get_datemanip_delta('Due'), 1);
+    # return due_conf_delta - (Due - NOW)
+    my $due_now_delta = $self->get_datemanip_delta('Due');
+    return (undef)
+        unless $due_now_delta;
+
+    my $due_conf_delta = $due_now_delta->new_delta();
+    $due_conf_delta->parse($conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr});
+
+    return $due_conf_delta->calc($due_now_delta, 0);
 }
 
 1;
