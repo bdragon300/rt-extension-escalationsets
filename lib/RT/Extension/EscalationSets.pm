@@ -82,21 +82,6 @@ Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
 =cut
 
-sub dm_to_str {
-    my $dm = shift; #Date::Manip obj
-    my $format = shift;
-    my $tz = shift;
-    
-    return $dm->printf($format) 
-        if $dm->printf("%s") eq '0';
-    my $obj = new Date::Manip::Date;
-    $obj->parse($dm->printf('%Y-%m-%d %T'));
-    $obj->convert($tz) 
-        if $tz;
-        
-    return $obj->printf($format);
-}
-
 sub str_to_dm {
     my %args = (
         Val     => undef,
@@ -112,9 +97,8 @@ sub str_to_dm {
     my $obj = new Date::Manip::Date;
     
     dm_set_default_config($obj);
-    map{ $obj->config($_, $args{'Config'}->{$_}) }
-        keys %{$args{'Config'}} 
-        if $args{'Config'};
+    $obj->config(%{$args{'Config'})
+        if ref($args{'Config'}) eq 'HASH';
     $obj->config('setdate', "zone," . $args{'FromTz'})
         if $args{'FromTz'};
         
@@ -136,15 +120,6 @@ sub dm_set_default_config
     $dmobj->config('WorkWeekBeg',  1);
     $dmobj->config('WorkWeekEnd',  7);
 }
-
-# This function exists because Date::Manip::Date::cmp sometimes not properly works
-#sub cmpDates {
-#    my $self = shift;
-#    my $a = shift;
-#    my $b = shift;
-#
-#    return ($a->printf("%s") cmp $b->printf("%s"));
-#}
 
 sub load_config {
 	my %conf = (
