@@ -252,20 +252,14 @@ sub timeline_due {
     my $now = shift;
     my $ticket = shift;
 
-    my $new_due = str_to_dm(Val => NOT_SET, FromTz => 'UTC');
-    $new_due->config(%{$dm_config})
-        if ref($dm_config) eq "HASH";
+    my $new_due = str_to_dm(Val => NOT_SET, FromTz => 'UTC', Config => $dm_config);
         
     unless ($config_delta) {
-        $new_due = str_to_dm(Val => $ticket->Due, FromTz => 'UTC');
-        $new_due->config(%{$dm_config})
-            if ref($dm_config) eq "HASH";
+        $new_due = str_to_dm(Val => $ticket->Due, FromTz => 'UTC', Config => $dm_config);
         return $new_due;
     }
 
-    my $calc_base = str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC');
-    $calc_base->config(%{$dm_config})
-        if ref($dm_config) eq "HASH";
+    my $calc_base = str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC', Config => $dm_config);
         
     my $delta = undef;
 
@@ -408,10 +402,11 @@ sub get_lvl_expired_dates
 
         # Make Date::Manip::Date obj from ticket date
         unless(exists($ticket_dates{$date_attr})) {
-            my $t = str_to_dm( Val => ($ticket->_Value($_) || NOT_SET ), FromTz => 'UTC' );
-            $t->config(%$dm_config}
-                if ($t && ref($dm_config) eq 'HASH');
-            $ticket_dates{$date_attr} = $t;
+            $ticket_dates{$date_attr} = str_to_dm( 
+                Val => ($ticket->_Value($_) || NOT_SET ), 
+                FromTz => 'UTC', 
+                Config => $dm_config 
+            );
         }
 
         my $d = $ticket_dates{$date_attr}->new_delta();
