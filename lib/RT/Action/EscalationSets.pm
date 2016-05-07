@@ -105,7 +105,6 @@ After preparation this method commits the action.
 
 =cut
 
-#TODO: huge Commit function, need to be refactored
 sub Commit {
     my $self = shift;
 
@@ -115,7 +114,7 @@ sub Commit {
 
 
     #
-    # Do retrieve info from config and ticket
+    # Init some config and ticket vars
     #
 
     # CF
@@ -158,10 +157,11 @@ sub Commit {
         $old_lvl = '';
     }
 
-    # Due from config
+    # Fill 'due' dates for Old and New esets
     my %conf_due = ();
-    foreach my $eset (($old_eset, $new_eset)) {
+    foreach my $eset ( ($old_eset, $new_eset) ) {
 
+        # User did not specified 'due' in eset config
         unless (exists($eset_data{$eset}->{'due'})) {
             $conf_due{$eset} = undef;
             next;
@@ -170,7 +170,7 @@ sub Commit {
         my $date_key = (keys %{$eset_data{$eset}->{'due'}})[0]
             if ref($eset_data{$eset}->{'due'}) eq 'HASH';
         unless ($ticket->_Accessible($date_key, 'read')) {
-            RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use _due date '$date_key' "
+            RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use due date '$date_key' "
                 . "in set $eset");
             return 0;
         }
@@ -182,7 +182,6 @@ sub Commit {
     # Change escalation set
     #
 
-    # Update escalation set CF if necessary
     $self->set_cf($eset_cf, $new_eset, $ticket)
         if ($old_eset ne $new_eset);
 
@@ -193,8 +192,9 @@ sub Commit {
 
     my $new_due = undef;
     if ($ticket->Due eq NOT_SET
-        && defined($conf_due{$new_eset})
+        && defined($conf_due{$new_eset}) # User specified 'due' in config
     ) {
+
         my $new_due = $self->timeline_due(
             $conf_due{$old_eset} || $conf_due{$new_eset},
             $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
@@ -202,9 +202,9 @@ sub Commit {
             $now,
             $ticket
         );
-        # Possible correct Due if escalation set is changing
-        if ( $conf_due{$old_eset} ne $conf_due{$new_eset} )
-        {
+
+        # Correct Due if escalation set is changing
+        if ( $conf_due{$old_eset} ne $conf_due{$new_eset} ) {
             $new_due = $self->eset_change_due(
                 $new_due,
                 $conf_due{$old_eset},
@@ -214,20 +214,9 @@ sub Commit {
                 $ticket
             );
         }
-        # Write new Due
-        if (defined $new_due) {
-            my $s = $new_due->printf(DATE_FORMAT);
-            if ($s ne $ticket->Due) {
-                my ($res, $msg) = $ticket->SetDue($s);
-                unless ($res) {
-                    RT::Logger->error("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-                        . ": unable to set Due: " . $msg);
-                    return 0;
-                }
-                RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-                    . ": Due set to " . $new_due->printf("%u"));
-            }
-        }
+
+        $self->set_due($new_due, $ticket)
+            if $new_due;
     }
 
     #
@@ -248,7 +237,6 @@ sub Commit {
     $new_lvl = $default_lvl
         if $old_lvl eq '';
 
-    ## Write escalation level if needed
     $self->set_cf($lvl_cf, $new_lvl, $ticket)
         if ($old_lvl ne $new_lvl);
     
@@ -477,5 +465,24 @@ sub set_cf
     return $res;
 }
 
+sub set_due
+{
+    my $self = shift;
+    my $val = shift;
+    my $ticket = shift;
+
+    my $s = $val->printf(DATE_FORMAT);
+    my ($res, $msg) = $ticket->SetDue($s);
+    if ($res) {
+        RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
+            . ": Due set to " . $val->printf("%u"));
+    } else {
+        RT::Logger->error("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
+            . ": unable to set Due: " . $msg);
+    }
+
+
+    return $res;
+}
 
 1;
