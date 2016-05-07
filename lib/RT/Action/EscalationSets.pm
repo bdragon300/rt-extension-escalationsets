@@ -235,13 +235,13 @@ sub Commit {
     #
 
     # Returns hashref lvl=>expired_dm_obj or undef
-    my $lvl = $self->get_lvl(
+    my $expired = $self->get_lvl_expired_dates(
         $eset_data{$new_eset}->{'levels'},
         $eset_data{$new_eset}->{'datemanip_config'},
         $ticket
     );
-    $lvl = (keys %$lvl)[0]
-        if $lvl;
+    my $lvl = $self->get_lvl($expired, $now)
+        if $expired;
 
     # New = New or Old (if was set) or Default
     my $new_lvl = $lvl // $old_lvl;
@@ -396,7 +396,7 @@ sub esets_business_delta {
     return (undef);
 }
 
-sub get_lvl
+sub get_lvl_expired_dates
 {
     my $self = shift;
     my $lvls = shift; # Hashref 'levels'=> ... from config
@@ -434,13 +434,27 @@ sub get_lvl
             return 0;
         }
 
-        my $expired = $ticket_dates{$date_attr}->calc($d, 0);
-        %recent = ($l => $expired)
-            if ( $expired->cmp( (values %recent)[0] ) );
+        $recent{$l} = $ticket_dates{$date_attr}->calc($d, 0);
     }
 
     return \%recent
         if %recent;
+
+    return (undef);
+}
+
+sub get_lvl
+{
+    my $self = shift;
+    my $expired_dates = shift; # Hashref lvl => expired_date
+    my $now = shift;
+
+    my @past = grep { $expired_dates->{$_}->cmp($now) < 0 } 
+        sort { $expired_dates{$b}->cmp($expired_dates{$a}) }
+        keys %$expired_dates;
+
+    return $past[0]
+        if @past;
 
     return (undef);
 }
