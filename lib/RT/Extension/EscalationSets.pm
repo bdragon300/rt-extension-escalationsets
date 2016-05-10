@@ -343,7 +343,7 @@ sub RT::Ticket::get_datemanip_date
     );
 }
 
-=head2 RT::Ticket::get_datemanip_delta FIELD, BASE, ESET
+=head2 RT::Ticket::get_datemanip_delta FIELD, ESET, BASE
 
 Template method. Builds Date::Manip::Delta between FIELD value and BASE
 
@@ -353,9 +353,9 @@ Receives
 
 =item FIELD - ticket field name
 
-=item BASE - if undef then use NOW (in UTC)
-
 =item ESET - escalation set. If undef then use current ticket one
+
+=item BASE - Date::Manip::Date obj. If undef then use NOW (in UTC)
 
 =back
 
@@ -375,8 +375,8 @@ sub RT::Ticket::get_datemanip_delta
 {
     my $self = shift;
     my $field = shift;
-    my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
     my $eset = shift;
+    my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
     
     return (undef)
         unless $self->_Accessible($field, 'read');
