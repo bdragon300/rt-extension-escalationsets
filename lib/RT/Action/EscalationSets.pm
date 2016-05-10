@@ -166,25 +166,20 @@ sub Commit
         $old_lvl = '';
     }
 
-    # Fill 'due' dates for Old and New esets
+    # {eset => [date_key, due_config], ...}
     my %conf_due = ();
     foreach my $eset ( ($old_eset, $new_eset) ) {
+        $conf_due{$eset} = undef;
 
-        # User did not specified 'due' in eset config
-        unless (exists($eset_data{$eset}->{'due'})) {
-            $conf_due{$eset} = undef;
-            next;
+        if (ref($eset_data{$eset}->{'due'}) eq 'HASH') {
+            $conf_due{$eset} = [(%{$eset_data{$eset}->{'due'}})[0..1]]; # First hashref pair as arrayref
+            
+            unless ($ticket->_Accessible($conf_due{$eset}->[0], 'read')) {
+                RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use due date '$date_key' "
+                    . "in set $eset");
+                return 0;
+            }
         }
-
-        my $date_key = (keys %{$eset_data{$eset}->{'due'}})[0]
-            if ref($eset_data{$eset}->{'due'}) eq 'HASH';
-        unless ($ticket->_Accessible($date_key, 'read')) {
-            RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use due date '$date_key' "
-                . "in set $eset");
-            return 0;
-        }
-
-        $conf_due{$eset} = $eset_data{$eset}->{'due'}->{$date_key};
     }
 
     #
@@ -216,8 +211,8 @@ sub Commit
         if ( $conf_due{$old_eset} ne $conf_due{$new_eset} ) {
             $new_due = $self->eset_change_due(
                 $new_due,
-                $conf_due{$old_eset},
-                $conf_due{$new_eset},
+                $conf_due{$old_eset}->[1],
+                $conf_due{$new_eset}->[1],
                 $eset_data{$new_eset}->{'datemanip_config'} || undef,
                 $now,
                 $ticket
@@ -253,7 +248,7 @@ sub Commit
     return 1;
 }
 
-=head2 timeline_due CONFIG_DELTA, DMCONFIG, TXN, NOW, TICKET
+=head2 timeline_due CONFIG, DMCONFIG, TXN, NOW, TICKET
 
 Calculates Due date using either TXN or CONFIG_DELTA otherwise.
 
@@ -261,7 +256,7 @@ Receives:
 
 =over
 
-=item CONFIG_DELTA - string from config, i.e. "3 minutes"
+=item CONFIG - arrayref, [date_name, config_value]
 
 =item DMCONFIG - hashref, Date::Manip config
 
@@ -288,7 +283,7 @@ Returns:
 sub timeline_due 
 {
     my $self = shift;
-    my $config_delta = shift; #string, i.e. "3 minutes"
+    my $config = shift; #arrayref, i.e. ['Created', '3 minutes']
     my $dm_config = shift; # Date::Manip config HASHREF
     my $txn = shift; #Last Due unset transaction
     my $now = shift;
@@ -296,7 +291,7 @@ sub timeline_due
 
     my $new_due = str_to_dm(Val => NOT_SET, FromTz => 'UTC', Config => $dm_config);
         
-    unless ($config_delta) {
+    unless ($config) {
         $new_due = str_to_dm(Val => $ticket->Due, FromTz => 'UTC', Config => $dm_config);
         return $new_due;
     }
@@ -323,11 +318,13 @@ sub timeline_due
     } else {
         # If Due unset and was not set before, ususally when ticket is seeing
         # Due = Start_ticket_date + Config_due
-        return (undef) if $ticket->Created eq NOT_SET; # Something wrong
+        my $ticket_date = $ticket->_Value($config->[0]);
+        return (undef)
+            if ( ! defined($ticket_date) || $ticket_date eq NOT_SET);
 
-        $calc_base->parse($ticket->Created);
+        $calc_base->parse($ticket_date);
         $delta = $calc_base->new_delta();
-        $delta->parse($config_delta);
+        $delta->parse($config->[1]);
     }
     
     # Perhaps fall to start of next business day
