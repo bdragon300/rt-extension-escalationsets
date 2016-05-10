@@ -15,27 +15,27 @@ use constant DATE_FORMAT => '%Y-%m-%d %T';
 
 =head1 NAME
 
-RT::Extension::EscalationSets - Different escalation rules (sets) 
-for different tickets
+C<RT::Extension::EscalationSets> - Conditional ticket escalation with business hours.
 
 =head1 DESCRIPTION
 
 Central concept is "set", that logically groups SLA time and escalation levels
-with their timeouts. You can apply different escalation sets to tickets
-depending on things in --search or --condition in rt-crontool, such as TicketSQL
-or Overdue. So you can tune ticket escalation more particularly.
+with their timeouts and can be assigned to ticket based on condition. You can 
+apply different escalation sets to tickets depending on things in --search or 
+--condition in rt-crontool, such as TicketSQL or Overdue. So you can tune 
+ticket escalation more particularly.
 
-The extension checks tickets periodically (via rt-crontool) using name of set
-passed as argument. If necessary the escalation process will be performed
-automatically to reach needed level. Extension can write comment, send email
-about level change. Each level can calculate based on Created, Due ticket
-fields. Current escalation level and set store in appropriate Custom Fields.
+The extension checks tickets periodically (via rt-crontool) and does escalation
+if necessary. Each level can be calculated based on Created, Due, Starts, etc.
+ticket fields. Current escalation level and set store in appropriate Custom 
+Fields.
+
+Business hours are supported and can be assigned to each set separately.
 
 Also the extension can set Due field for each set separately (if specified in
 config). If ticket will move to another escalation set then Due will be
-recalculated. If Due was set before extension "saw" the ticket then it doesn't
-touch Due anymore but escalation will work. This allows specify another Due
-value manually or by another scrip, for example.
+recalculated. Also you can change Due manually and escalation will do based on
+that value.
 
 The extension supports pausing SLA time (such as stalled status, etc.). When
 ticket goes into "paused" state the Due must be unset and then the extension
@@ -43,8 +43,8 @@ must not "see" the ticket until it will come from "paused" state. When this
 happened the Due automatically recalculated.
 
 You can create set that will not use Due. In this case the escalation will be
-performed simply based on Created (B<_dueinterval> is not specified, see below).
-"Pausing" tickets will not support, i.e. SLA time will be continuous.
+performed simply based on Created (B<due> is not specified, see below).
+"Pausing" tickets in this case will not support.
 
 =head1 DEPENDENCIES
 
@@ -108,9 +108,37 @@ the same terms as Perl itself.
 
 Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
+
+
 =head1 METHODS
 
-newDateObj DATE, TIMEZONE
+=head2 str_to_dm Val, [FromTz], [ToTz], [Config]
+
+Builds Date::Manip::Date object based on date string and config
+
+Receives:
+
+=over
+
+=item Val - date string
+
+=item FromTz - Val's timezone. If omitted use Date::Manip default
+
+=item ToTz - convert Val to this timezone
+
+=item Config - hashref, Date::Manip config
+
+=back
+
+Returns
+
+=over
+
+=item Date::Manip::Date object
+
+=item undef if error
+
+=back
 
 =cut
 
@@ -142,6 +170,22 @@ sub str_to_dm {
     return $obj;
 }
 
+=head2 dm_set_default_config DMOBJ
+
+Sets default config to Date::Manip object 
+
+Receives:
+
+=over
+
+=item DMOBJ - Date::Manip object
+
+=back
+
+Returns nothing
+
+=cut
+
 sub dm_set_default_config
 {
     my $dmobj = shift;
@@ -152,6 +196,26 @@ sub dm_set_default_config
     $dmobj->config('WorkWeekBeg',  1);
     $dmobj->config('WorkWeekEnd',  7);
 }
+
+=head2 load_config
+
+Reads extension config
+
+Receives
+
+None
+
+Returns
+
+=over
+
+=item HASHREF config
+
+=item (undef) if error
+
+=back
+
+=cut
 
 sub load_config {
 	my %conf = (
@@ -164,6 +228,30 @@ sub load_config {
     return \%conf;
 }
 
+=head2 get_current_eset TICKET
+
+Retrieve current ticket escalation set
+
+Receives
+
+=over
+
+=item TICKET - RT::Ticket object
+
+=back
+
+Returns
+
+=over
+
+=item STRING - current escalation set
+
+=item (undef) if error
+
+=back
+
+=cut
+
 sub get_current_eset
 {
     my $ticket = shift;
@@ -173,6 +261,32 @@ sub get_current_eset
     undef $config;
     return $ticket->FirstCustomFieldValue($eset_cf);
 }
+
+=head2 get_dm_config_by_eset ESET, TICKET
+
+Returns Date::Manip config for escalation set
+
+Receives
+
+=over
+
+=item ESET - escalation set. If undef then use current ticket one
+
+=item TICKET - RT::Ticket object
+
+=back
+
+Returns
+
+=over
+
+=item HASHREF - config of Date::Manip
+
+=item (undef) if not found or error
+
+=back
+
+=cut
 
 sub get_dm_config_by_eset
 {
@@ -184,13 +298,40 @@ sub get_dm_config_by_eset
         if $eset eq 'current';
     return $config->{$eset}->{'datemanip_config'}
         if exists($config->{$eset});
+    return (undef);
 }
+
+=head2 RT::Ticket::get_datemanip_date FIELD, ESET
+
+Template method. Builds Date::Manip::Date for FIELD value
+
+Receives
+
+=over
+
+=item FIELD - ticket field name
+
+=item ESET - escalation set. If undef then use current ticket one
+
+=back
+
+Returns
+
+=over
+
+=item Date::Manip::Date object
+
+=item (undef) if error
+
+=back
+
+=cut
 
 sub RT::Ticket::get_datemanip_date
 {
     my $self = shift;
     my $field = shift;
-    my $eset = shift // 'current';
+    my $eset = shift;
 
     return (undef) 
         unless $self->_Accessible($field, 'read');
@@ -202,12 +343,40 @@ sub RT::Ticket::get_datemanip_date
     );
 }
 
+=head2 RT::Ticket::get_datemanip_delta FIELD, BASE, ESET
+
+Template method. Builds Date::Manip::Delta between FIELD value and BASE
+
+Receives
+
+=over
+
+=item FIELD - ticket field name
+
+=item BASE - if undef then use NOW (in UTC)
+
+=item ESET - escalation set. If undef then use current ticket one
+
+=back
+
+Returns
+
+=over
+
+=item Date::Manip::Delta object
+
+=item (undef) if error
+
+=back
+
+=cut
+
 sub RT::Ticket::get_datemanip_delta
 {
     my $self = shift;
     my $field = shift;
     my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
-    my $eset = shift // 'current';
+    my $eset = shift;
     
     return (undef)
         unless $self->_Accessible($field, 'read');
@@ -224,6 +393,28 @@ sub RT::Ticket::get_datemanip_delta
 
     return $f->calc($base, 1);
 }
+
+=head2 RT::Ticket::get_datemanip_worktime
+
+Template method. Returns ticket worktime Delta object
+
+Note: if Due was changed manually sometime then result will not be correct
+because it calculates based on current escalation set and contains difference
+between whole ticket time and remaining time
+
+Receives: nothing
+
+Returns
+
+=over
+
+=item Date::Manip::Delta object
+
+=item (undef) if error
+
+=back
+
+=cut
 
 sub RT::Ticket::get_datemanip_worktime
 {
