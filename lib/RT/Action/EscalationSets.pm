@@ -11,8 +11,7 @@ use RT::Extension::EscalationSets
 
 =head1 NAME
 
-C<RT::Action::EscalationSets> - Makes check accordingly passed escalation set on
-each of given tickets. If its time to do escalation for the ticket then does it.
+C<RT::Action::EscalationSets> - Do escalation with escalation set passed as parameter 
 
 =head1 DESCRIPTION
 
@@ -28,40 +27,25 @@ This Action uses fields:
 
 =back
 
-Escalation set can be with specified B<_dueinterval> key (Due-like) and not. In
-first case it will use Due to escalate and you can specify escalation time based
-on Due. In second case ticket can escalate based only Created.
-
 Common rules are: 
 
 =over 
 
-=item When ticket in paused Status (stalled, etc.) then Due must be empty (some
+=item When ticket outside of SLA (stalled, etc.) then Due must be empty (some
 Scrip can do that);
 
-=item When ticket goes from paused Status then Due recalculates again based on last
-Due value (Due-like sets only);
+=item When ticket goes to SLA then Due recalculates again based on last
+Due value (if 'due' is set in config);
 
 =item Actual set/value are always write in appropriate custom fields when extension
 passes the ticket;
 
-=item Ticket can go from Due-like to non-Due-like. Not conversely, because in this
-case we cannot correctly calculate Due. Of course, ticket can go 
-Due-like -> Due-like and non-Due-like -> non-Due-like sets;
-
-=item If escalation set has changed then Due must be also recalculated (between 
+=item If escalation set has changed then Due will be also recalculated (between 
 Due-like sets);
 
-=item If ticket has another Due before EscalationSets firstly saw it and the current
-set is Due-like then Due will not be recalculated. This allows set another Due
-to some tickets.
+=item You can set Due manually and escalation will be performed based on this value.
 
 =back
-
-Extension tests ticket's fields (Created, Due) and determines whether its time
-to escalate ticket and to what level. On escalation configured actions will be
-performed (send email, write comment to the ticket). Next actual set and level
-will be wrote to approrpiate CustomFields.
 
 =head1 AUTHOR
 
@@ -82,17 +66,6 @@ the same terms as Perl itself.
 
 Request Tracker (RT) is Copyright Best Practical Solutions, LLC.
 
-
-=head1 METHODS
-
-
-=head2 Prepare
-
-Before the action may be L<commited|/"Commit"> preparation is needed: Has RT
-already been configured for this action? Has the needed custom field been
-created yet?
-
-
 =cut
 
 use Data::Dumper qw(Dumper);
@@ -102,6 +75,15 @@ use constant NOT_SET => '1970-01-01 00:00:00';
 
 ## MySQL date time format:
 use constant DATE_FORMAT => '%Y-%m-%d %T';
+
+=head1 METHODS
+
+
+=head2 Prepare
+
+Preparation before Commit and pre-flight check. Calls by RT itself.
+
+=cut
 
 sub Prepare {
     my $self = shift;
@@ -271,7 +253,38 @@ sub Commit
     return 1;
 }
 
-# Calculates Due based on config delta or last Due for current (old) escalation set
+=head2 timeline_due CONFIG_DELTA, DMCONFIG, TXN, NOW, TICKET
+
+Calculates Due date using either TXN or CONFIG_DELTA otherwise.
+
+Receives:
+
+=over
+
+=item CONFIG_DELTA - string from config, i.e. "3 minutes"
+
+=item DMCONFIG - hashref, Date::Manip config
+
+=item TXN - RT::Transaction obj, last Due unset transaction
+
+=item NOW - Date::Manip::Date obj
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item Date::Manip::Date obj - Due with DMCONFIG configuration
+
+=item undef if error
+
+=back
+
+=cut
+
 sub timeline_due 
 {
     my $self = shift;
@@ -325,6 +338,30 @@ sub timeline_due
 }
 
 
+=head2 get_due_unset_txn TICKET
+
+Retrieves last Due unset transaction in ticket
+
+Receives:
+
+=over
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item RT::Transaction obj
+
+=item undef if not found
+
+=back
+
+=cut
+
 sub get_due_unset_txn 
 {
     my $self = shift;
@@ -337,6 +374,41 @@ sub get_due_unset_txn
     $txns->OrderBy(FIELD => 'id', ORDER => 'DESC');
     return $txns->First;
 }
+
+
+=head2 eset_change_due DUE, OLD_DUE_DELTA, NEW_DUE_DELTA, NEW_DMCONFIG, NOW, TICKET
+
+Corrects DUE according with changing escalation set.
+
+Receives:
+
+=over
+
+=item DUE - Date::Manip::Date obj
+
+=item OLD_DUE_DELTA - string, old escalation set config delta
+
+=item NEW_DUE_DELTA - string, new escalation set config delta
+
+=item NEW_DMCONFIG - hashref, will be applied after correction
+
+=item NOW - Date::Manip::Date obj
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item Date::Manip::Date obj - DUE
+
+=item undef if error
+
+=back
+
+=cut
 
 sub eset_change_due 
 {
@@ -396,6 +468,34 @@ sub eset_change_due
 }
 
 
+=head2 esets_business_delta OLD_CONFIG_DELTA, NEW_CONFIG_DELTA, NOW
+
+Returns Date::Manip::Delta difference between (NEW_CONFIG_DELTA - OLD_CONFIG_DELTA)
+
+Receives:
+
+=over
+
+=item OLD_CONFIG_DELTA - string, old escalation set config delta
+
+=item NEW_CONFIG_DELTA - string, new escalation set config delta
+
+=item NOW - Date::Manip::Date obj
+
+=back
+
+Returns:
+
+=over
+
+=item Date::Manip::Delta obj
+
+=item undef if error
+
+=back
+
+=cut
+
 sub esets_business_delta 
 {
     my $self = shift;
@@ -412,6 +512,35 @@ sub esets_business_delta
         if ($new_delta && $old_delta); # Date::Manip::Delta
     return (undef);
 }
+
+
+=head2 get_lvl_expired_dates LVLS, DMCONFIG, TICKET
+
+Returns dates on which each escalation level expire
+
+Receives:
+
+=over
+
+=item LVLS - hashref, 'levels' => ... part of escalation set configuration
+
+=item DMCONFIG - hashref, Date::Manip config that all dates must have
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item HASHREF - {lvl => Date::Manip::Date, ...}
+
+=item undef if error
+
+=back
+
+=cut
 
 sub get_lvl_expired_dates
 {
@@ -461,6 +590,33 @@ sub get_lvl_expired_dates
     return (undef);
 }
 
+
+=head2 get_lvl EXPIRED_DATES, NOW
+
+Returns escalation level that have to be now. In other words "the most latter level in past".
+
+Receives:
+
+=over
+
+=item EXPIRED_DATES - hashref, {lvl => Date::Manip::Date,...}, see get_lvl_expired_dates
+
+=item NOW - Date::Manip::Date obj
+
+=back
+
+Returns:
+
+=over
+
+=item STRING - escalation level name
+
+=item undef if no level came now
+
+=back
+
+=cut
+
 sub get_lvl
 {
     my $self = shift;
@@ -476,6 +632,33 @@ sub get_lvl
 
     return (undef);
 }
+
+
+=head2 set_cf CF, VAL, TICKET
+
+Sets CustomField value
+
+Receives:
+
+=over
+
+=item CF - CustomField name
+
+=item VAL - CustomField value
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item SCALAR
+
+=back
+
+=cut
 
 sub set_cf
 {
@@ -494,6 +677,31 @@ sub set_cf
     }
     return $res;
 }
+
+
+=head2 set_due VAL, TICKET
+
+Sets Due value
+
+Receives:
+
+=over
+
+=item VAL - Due value
+
+=item TICKET - RT::Ticket obj
+
+=back
+
+Returns:
+
+=over
+
+=item SCALAR
+
+=back
+
+=cut
 
 sub set_due
 {
