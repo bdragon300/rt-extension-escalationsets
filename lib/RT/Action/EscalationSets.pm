@@ -147,13 +147,7 @@ sub Commit
     }
 
     # Default escalation level
-    my $default_lvl = $eset_data{$new_eset}->{'default_level'}
-        if exists($eset_data{$new_eset}->{'default_level'});
-    unless ( defined($default_lvl) ) {
-        RT::Logger->error("[RT::Extension::EscalationSets]: 'default_level' setting not found "
-            . "in escalation set '$new_eset'");
-        return 0;
-    }
+    my $default_lvl = $eset_data{$new_eset}->{'default_level'} // '';
 
     # Old escalation level
     my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf) // '';
