@@ -417,6 +417,8 @@ sub eset_change_due
     my $now = shift;
     my $ticket = shift;
 
+    return (undef) unless $due;
+
     #Log msgs if necessary
     if ($ticket->Due eq NOT_SET) {
 
@@ -445,8 +447,6 @@ sub eset_change_due
 
     }
 
-
-    return (undef) unless $due;
 
     # Calculate difference between _due in new escalation set and old one
     # Then add the result to new Due value
