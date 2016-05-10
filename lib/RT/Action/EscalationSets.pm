@@ -211,8 +211,8 @@ sub Commit
         if ( $conf_due{$old_eset} ne $conf_due{$new_eset} ) {
             $new_due = $self->eset_change_due(
                 $new_due,
-                $conf_due{$old_eset}->[1],
-                $conf_due{$new_eset}->[1],
+                $conf_due{$old_eset},
+                $conf_due{$new_eset},
                 $eset_data{$new_eset}->{'datemanip_config'} || undef,
                 $now,
                 $ticket
@@ -383,9 +383,9 @@ Receives:
 
 =item DUE - Date::Manip::Date obj
 
-=item OLD_DUE_DELTA - string, old escalation set config delta
+=item OLD_DUE_DELTA - arrayref, [date_name, config_value]
 
-=item NEW_DUE_DELTA - string, new escalation set config delta
+=item NEW_DUE_DELTA - arrayref, [date_name, config_value]
 
 =item NEW_DMCONFIG - hashref, will be applied after correction
 
@@ -411,8 +411,8 @@ sub eset_change_due
 {
     my $self = shift;
     my $due = shift;
-    my $old_due_delta = shift; #string
-    my $new_due_delta = shift; #string
+    my $old_due_delta = shift; #arrayref, i.e. ['Created', '3 minutes']
+    my $new_due_delta = shift; #
     my $new_dm_config = shift;
     my $now = shift;
     my $ticket = shift;
@@ -427,7 +427,7 @@ sub eset_change_due
             RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
                 . ": Due is not set when going out of escalation by some reason.");
         }
-        elsif ($old_due_delta && $new_due_delta ne $old_due_delta) {
+        elsif ($old_due_delta && $new_due_delta->[1] ne $old_due_delta->[1]) {
             RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
                 . ": Due is unset when changing escalation set.");
         }
@@ -450,7 +450,7 @@ sub eset_change_due
 
     # Calculate difference between _due in new escalation set and old one
     # Then add the result to new Due value
-    my $d1 = $self->esets_business_delta($old_due_delta, $new_due_delta, $now);
+    my $d1 = $self->esets_business_delta($old_due_delta, $new_due_delta, $new_dm_config, $ticket);
     
     $due->config(%{$new_dm_config})
         if ref($new_dm_config) eq 'HASH';
@@ -465,7 +465,7 @@ sub eset_change_due
 }
 
 
-=head2 esets_business_delta OLD_CONFIG_DELTA, NEW_CONFIG_DELTA, NOW
+=head2 esets_business_delta OLD_CONFIG_DELTA, NEW_CONFIG_DELTA, NEW_DMCONFIG, NOW, TICKET
 
 Returns Date::Manip::Delta difference between (NEW_CONFIG_DELTA - OLD_CONFIG_DELTA)
 
@@ -473,11 +473,13 @@ Receives:
 
 =over
 
-=item OLD_CONFIG_DELTA - string, old escalation set config delta
+=item OLD_CONFIG_DELTA - arrayref, [date_name, config_value]
 
-=item NEW_CONFIG_DELTA - string, new escalation set config delta
+=item NEW_CONFIG_DELTA - arrayref, [date_name, config_value]
 
-=item NOW - Date::Manip::Date obj
+=item NEW_DMCONFIG - hashref, will be applied after correction
+
+=item TICKET - RT::Ticket obj
 
 =back
 
@@ -498,16 +500,31 @@ sub esets_business_delta
     my $self = shift;
     my $old_config_delta = shift;
     my $new_config_delta = shift;
-    my $now = shift;
+    my $new_dm_config = shift;
+    my $ticket = shift;
 
-    my $old_delta = $now->new_delta();
-    $old_delta->parse($old_config_delta, 'business');
-    my $new_delta = $now->new_delta();
-    $new_delta->parse($new_config_delta, 'business');
+    my $old_delta = new Date::Manip::Delta;
+    $old_delta->parse($old_config_delta->[1]);
+    my $new_delta = new Date::Manip::Delta;
+    $new_delta->parse($new_config_delta->[1]);
     
-    return $new_delta->calc($old_delta, 1) 
-        if ($new_delta && $old_delta); # Date::Manip::Delta
-    return (undef);
+    return (undef)
+        unless($old_delta && $new_delta);
+
+    my $old_date = str_to_dm($ticket->_Value($old_config_delta->[0]), FromTz => 'UTC')
+        if ($old_config_delta && $ticket->_Accessible($old_config_delta->[0]));
+        
+    my $new_date = str_to_dm($ticket->_Value($new_config_delta->[0]), FromTz => 'UTC', Config => $new_dm_config)
+        if ($new_config_delta && $ticket->_Accessible($new_config_delta->[0]));
+
+    return (undef)
+        unless($old_date && $new_date);
+    return (undef)
+        if($old_date eq NOT_SET || $new_date eq NOT_SET);
+    
+    $old_date = $old_date->calc($old_delta, 0);
+    $new_date = $new_date->calc($new_delta, 0);
+    return $new_date->calc($old_date, 1);
 }
 
 
