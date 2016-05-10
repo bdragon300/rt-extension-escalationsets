@@ -129,7 +129,7 @@ sub str_to_dm {
     my $obj = new Date::Manip::Date;
     
     dm_set_default_config($obj);
-    $obj->config(%{$args{'Config'})
+    $obj->config(%{$args{'Config'}})
         if ref($args{'Config'}) eq 'HASH';
     $obj->config('setdate', "zone," . $args{'FromTz'})
         if $args{'FromTz'};
@@ -177,9 +177,10 @@ sub get_current_eset
 sub get_dm_config_by_eset
 {
     my $eset = shift // 'current';
+    my $ticket = shift;
 
     my $config = load_config();
-    $eset = get_current_eset($self)
+    $eset = get_current_eset($ticket)
         if $eset eq 'current';
     return $config->{$eset}->{'datemanip_config'}
         if exists($config->{$eset});
@@ -197,7 +198,7 @@ sub RT::Ticket::get_datemanip_date
     return str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC',
-        Config => get_dm_config_by_eset($eset)
+        Config => get_dm_config_by_eset($eset, $self)
     );
 }
 
