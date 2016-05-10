@@ -636,7 +636,7 @@ sub get_lvl
 
 =head2 set_cf CF, VAL, TICKET
 
-Sets CustomField value
+Sets CustomField value. Removes all previous values
 
 Receives:
 
@@ -667,13 +667,25 @@ sub set_cf
     my $val = shift;
     my $ticket = shift;
     
-    my ($res, $msg) = $ticket->AddCustomFieldValue(Field => $cf, Value => $val);
+    my $cf_obj = $ticket->LoadCustomFieldByIdentifier($cf);
+    
+    # Delete old values if needed
+    my $cf_vals = $cf->ValuesForObject($ticket);
+    while(my $cf_val = $cf_vals->Next()) {
+        my ($res, $msg) = $cf_obj->DeleteValueForObject( Object => $ticket, Id => $cf_val->id );
+        unless($res) {
+            RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
+                . "Cannot delete value for CF.$cf : $msg");
+        }
+    }
+    
+    my ($res, $msg) = $cf_obj->AddValueForObject( Object  => $ticket, Content => $val );
     if ($res) {
         RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-            . ": CF." . $cf . " changed to " . $val);
+            . ": CF.$cf value changed to '$val'");
     } else {
         RT::Logger->error("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-            . ": unable to set CF." . $cf . ": " . $msg);
+            . ": Cannot set CF.$cf : $msg");
     }
     return $res;
 }
