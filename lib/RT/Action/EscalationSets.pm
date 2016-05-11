@@ -285,10 +285,7 @@ sub timeline_due
 
     my $new_due = str_to_dm(Val => NOT_SET, FromTz => 'UTC', Config => $dm_config);
         
-    unless ($config) {
-        $new_due = str_to_dm(Val => $ticket->Due, FromTz => 'UTC', Config => $dm_config);
-        return $new_due;
-    }
+    return (undef) unless ($config);
 
     my $calc_base = str_to_dm(Val => $now->printf(DATE_FORMAT), FromTz => 'UTC', Config => $dm_config);
         
