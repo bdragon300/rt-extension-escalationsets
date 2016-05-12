@@ -5,7 +5,7 @@ license 'perl';
 author 'Igor Derkach <gosha753951@gmail.com>';
 version '0.1';
 
-build_requires('Test::Simple');
+build_requires('Test::More');
 requires 'Date::Manip' => '6.25';
 requires_rt('4.0.0');
 auto_install();
@@ -26,11 +26,12 @@ substitute(
     },
     qw(
         lib/RT/Extension/EscalationSets/Test.pm
+        lib/RT/Extension/EscalationSets/TestFunc.pm
         lib/RT/Extension/EscalationSets/MockTransaction.pm
         lib/RT/Extension/EscalationSets/Sample_SiteConfig.pm
     ),
 );
-tests 'xt/*.t';
+tests 'xt/*.t xt/*/*.t';
 
 sign;
 &WriteAll;

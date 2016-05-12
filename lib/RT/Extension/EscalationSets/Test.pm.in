@@ -4,6 +4,11 @@ use warnings;
 package RT::Extension::EscalationSets::Test;
 use base 'RT::Test';
 
+my @EXPORT = qw/ do_set_unset_due  increase_date  new_ticket /;
+
+## UNIX timestamp 0:
+use constant NOT_SET => '1970-01-01 00:00:00';
+
 sub bootstrap_more_config
 {
     my $self = shift;
@@ -19,4 +24,5 @@ sub bootstrap_more_config
 
     close $site_config;
 }
+
 1;

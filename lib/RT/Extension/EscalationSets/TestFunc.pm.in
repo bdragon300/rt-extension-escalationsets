@@ -1,0 +1,44 @@
+use strict;
+use warnings;
+
+package RT::Extension::EscalationSets::TestFunc;
+use Exporter 'import';
+
+use constant DATE_FORMAT => '%Y-%m-%d %T';
+use constant NOT_SET => '1970-01-01 00:00:00';
+
+our @EXPORT = qw/ do_set_unset_due  increase_date  new_ticket is_configured /;
+
+# Sets Due to value and unsets it again and returns the last (unset) txn
+sub do_set_unset_due
+{
+    my ($tkt, $due) = @_; #due is string
+    $tkt->SetDue($due);
+    $tkt->SetDue(NOT_SET);
+    return $tkt->Transactions->Last;
+}
+
+sub increase_date
+{
+    my $base_date = shift; #obj
+    my $offset = shift; #string
+    my $mode = shift || 'exact';
+
+    my $tdelta = $base_date->new_delta();
+    $tdelta->parse($offset);
+    return $base_date->calc($tdelta, 0, $mode);
+}
+
+sub new_ticket
+{
+    return RT::Test->create_ticket(Queue => 'General', Content => 'Sample content', Subject => 'Sample ticket', Requestor => 'test@example.com');
+}
+
+sub is_configured
+{
+    my ($obj, $conf) = @_;
+    my @mismatch = grep{ $conf->{$_} ne $obj->get_config($_) } keys %{$conf};
+    return (scalar(@mismatch) == 0);
+}
+
+1;
