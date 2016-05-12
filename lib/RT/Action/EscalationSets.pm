@@ -169,8 +169,8 @@ sub Commit
             $conf_due{$eset} = [(%{$eset_data{$eset}->{'due'}})[0..1]]; # First hashref pair as arrayref
             
             unless ($ticket->_Accessible($conf_due{$eset}->[0], 'read')) {
-                RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use due date '$date_key' "
-                    . "in set $eset");
+                RT::Logger->error("[RT::Extension::EscalationSets]: Unable to use due date '" . $conf_due{$eset}->[0]
+                    . "' in set $eset");
                 return 0;
             }
         }
@@ -380,8 +380,6 @@ Receives:
 
 =item NEW_DMCONFIG - hashref, will be applied after correction
 
-=item NOW - Date::Manip::Date obj
-
 =item TICKET - RT::Ticket obj
 
 =back
@@ -405,30 +403,17 @@ sub eset_change_due
     my $old_due_delta = shift; #arrayref, i.e. ['Created', '3 minutes']
     my $new_due_delta = shift; #
     my $new_dm_config = shift;
-    my $now = shift;
     my $ticket = shift;
 
     return (undef) unless $due;
 
     #Log msgs if necessary
-    if ($ticket->Due eq NOT_SET) {
-
-        unless ($new_due_delta) {
-            $due->parse(NOT_SET);
-            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-                . ": Due is not set when going out of escalation by some reason.");
-        }
-        elsif ($old_due_delta && $new_due_delta->[1] ne $old_due_delta->[1]) {
-            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-                . ": Due is unset when changing escalation set.");
-        }
-
-    } else {
+    if ($ticket->Due ne NOT_SET) {
 
         unless ($old_due_delta) {
             $due = undef;
-            RT::Logger->warning("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-                . ": Due is set on ticket with no escalation set. Cannot calculate Due.");
+            RT::Logger->info("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
+                . ": Due is present in ticket with unknown escalation set.");
         }
         unless ($new_due_delta) {
             $due->parse(NOT_SET);
@@ -456,7 +441,7 @@ sub eset_change_due
 }
 
 
-=head2 esets_business_delta OLD_CONFIG_DELTA, NEW_CONFIG_DELTA, NEW_DMCONFIG, NOW, TICKET
+=head2 esets_business_delta OLD_CONFIG_DELTA, NEW_CONFIG_DELTA, NEW_DMCONFIG, TICKET
 
 Returns Date::Manip::Delta difference between (NEW_CONFIG_DELTA - OLD_CONFIG_DELTA)
 
@@ -494,6 +479,7 @@ sub esets_business_delta
     my $new_dm_config = shift;
     my $ticket = shift;
 
+    use Date::Manip::Delta;
     my $old_delta = new Date::Manip::Delta;
     $old_delta->parse($old_config_delta->[1]);
     my $new_delta = new Date::Manip::Delta;
@@ -502,20 +488,20 @@ sub esets_business_delta
     return (undef)
         unless($old_delta && $new_delta);
 
-    my $old_date = str_to_dm($ticket->_Value($old_config_delta->[0]), FromTz => 'UTC')
-        if ($old_config_delta && $ticket->_Accessible($old_config_delta->[0]));
+    my $old_date = str_to_dm(Val => $ticket->_Value($old_config_delta->[0]), FromTz => 'UTC')
+        if ($old_config_delta && $ticket->_Accessible($old_config_delta->[0], 'read'));
         
-    my $new_date = str_to_dm($ticket->_Value($new_config_delta->[0]), FromTz => 'UTC', Config => $new_dm_config)
-        if ($new_config_delta && $ticket->_Accessible($new_config_delta->[0]));
+    my $new_date = str_to_dm(Val => $ticket->_Value($new_config_delta->[0]), FromTz => 'UTC', Config => $new_dm_config)
+        if ($new_config_delta && $ticket->_Accessible($new_config_delta->[0], 'read'));
 
     return (undef)
         unless($old_date && $new_date);
     return (undef)
-        if($old_date eq NOT_SET || $new_date eq NOT_SET);
+        if($old_date->printf(DATE_FORMAT) eq NOT_SET || $new_date->printf(DATE_FORMAT) eq NOT_SET);
     
     $old_date = $old_date->calc($old_delta, 0);
     $new_date = $new_date->calc($new_delta, 0);
-    return $new_date->calc($old_date, 1);
+    return $new_date->calc($old_date, 1, 'business');
 }
 
 
@@ -566,13 +552,16 @@ sub get_lvl_expired_dates
                 . "Unable to use attribute '$date_attr' in level $l");
             return 0;
         }
-        
-        next if ($ticket->_Value($date_attr) eq NOT_SET);
+
+        $recent{$l} = undef;
+
+        my $val = $ticket->_Value($date_attr);
+        next if ( ! $val || $val eq NOT_SET);
 
         # Make Date::Manip::Date obj from ticket date
         unless(exists($ticket_dates{$date_attr})) {
             $ticket_dates{$date_attr} = str_to_dm( 
-                Val => ($ticket->_Value($_) || NOT_SET ), 
+                Val => ( ($val) || NOT_SET ),
                 FromTz => 'UTC', 
                 Config => $dm_config 
             );
@@ -629,7 +618,7 @@ sub get_lvl
     my $now = shift;
 
     my @past = grep { $expired_dates->{$_}->cmp($now) < 0 } 
-        sort { $expired_dates{$b}->cmp($expired_dates{$a}) }
+        sort { $expired_dates->{$b}->cmp($expired_dates->{$a}) }
         keys %$expired_dates;
 
     return $past[0]
