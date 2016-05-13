@@ -146,19 +146,6 @@ sub Commit
             . " has unknown escalation set: '$old_eset'. Will be corrected");
     }
 
-    # Default escalation level
-    my $default_lvl = $eset_data{$new_eset}->{'default_level'} // '';
-
-    # Old escalation level
-    my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf) // '';
-    if (exists($eset_data{$old_eset})
-        && ! exists($eset_data{$old_eset}->{'levels'}->{$old_lvl})
-        && $old_lvl ne ''
-    ) {
-        RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
-            . " has unknown escalation level: '$old_lvl'. Will be corrected");
-        $old_lvl = '';
-    }
 
     # {eset => [date_key, due_config], ...}
     my %conf_due = ();
@@ -189,34 +176,33 @@ sub Commit
     #
 
     my $new_due = undef;
-    if ($ticket->Due eq NOT_SET
-        && defined($conf_due{$new_eset}) # User specified 'due' in config
-    ) {
-
-        my $new_due = $self->timeline_due(
+    if ( ($ticket->Due eq NOT_SET && exists($conf_due{$new_eset}))
+        || $old_eset ne $new_eset )
+    { # User specified 'due' in config
+        $new_due = $self->timeline_due(
             $conf_due{$old_eset} || $conf_due{$new_eset},
             $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
             $self->get_due_unset_txn($ticket),
             $now,
             $ticket
         );
-
+    }
+    if ($old_eset ne $new_eset
+        && $old_eset ne ''
+        && exists($conf_due{$new_eset}))
+    {
         # Correct Due if escalation set is changing
-        if ( $conf_due{$old_eset} ne $conf_due{$new_eset} ) {
-            $new_due = $self->eset_change_due(
-                $new_due,
-                $conf_due{$old_eset},
-                $conf_due{$new_eset},
-                $eset_data{$new_eset}->{'datemanip_config'} || undef,
-                $now,
-                $ticket
-            );
-        }
-
-        $self->set_due($new_due, $ticket)
-            if $new_due;
+        $new_due = $self->eset_change_due(
+            $new_due,
+            $conf_due{$old_eset},
+            $conf_due{$new_eset},
+            $eset_data{$new_eset}->{'datemanip_config'} || undef,
+            $ticket
+        );
     }
 
+    $self->set_due($new_due, $ticket)
+        if $new_due;
 
     #
     # Calculate escalation level
@@ -231,10 +217,25 @@ sub Commit
     my $lvl = $self->get_lvl($expired, $now)
         if $expired;
 
+    # Default escalation level
+    my $default_lvl = $eset_data{$new_eset}->{'default_level'} // '';
+
+    # Old escalation level
+    my $old_lvl = $ticket->FirstCustomFieldValue($lvl_cf) // '';
+    if (exists($eset_data{$old_eset})
+        && ! exists($eset_data{$old_eset}->{'levels'}->{$old_lvl})
+        && $old_lvl ne $default_lvl
+        && $old_lvl ne ''
+    ) {
+        RT::Logger->notice("[RT::Extension::EscalationSets]: Ticket #" . $ticket->id
+            . " has unknown escalation level: '$old_lvl'. Will be corrected");
+        $old_lvl = '';
+    }
+
     # New = New or Old (if was set) or Default
     my $new_lvl = $lvl // $old_lvl;
     $new_lvl = $default_lvl
-        if $old_lvl eq '';
+        if $new_lvl eq '';
 
     $self->set_cf($lvl_cf, $new_lvl, $ticket)
         if ($old_lvl ne $new_lvl);
@@ -664,7 +665,7 @@ sub set_cf
     my $cf_obj = $ticket->LoadCustomFieldByIdentifier($cf);
     
     # Delete old values if needed
-    my $cf_vals = $cf->ValuesForObject($ticket);
+    my $cf_vals = $cf_obj->ValuesForObject($ticket);
     while(my $cf_val = $cf_vals->Next()) {
         my ($res, $msg) = $cf_obj->DeleteValueForObject( Object => $ticket, Id => $cf_val->id );
         unless($res) {
