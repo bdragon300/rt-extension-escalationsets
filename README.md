@@ -140,15 +140,15 @@ RT::Action::EscalationSets can be called by rt-crontool:
 
 # Writing templates
 
-There are some template methods (in $Ticket obj):
+There are some template methods:
 
-* get_datemanip_date FIELD, [ESCALATION_SET=<current>] - returns
+* $Ticket->get_datemanip_date FIELD, [ESCALATION_SET=<current>] - returns
   Date::Manip::Date object for given ticket FIELD. Retrieves config from
   ESECALATION_SET. If not passed then use current ticket escalation set
-* get_datemanip_delta FIELD, [ESCALATION_SET=<current>], [BASE=<now>] - returns
+* $Ticket->get_datemanip_delta FIELD, [ESCALATION_SET=<current>], [BASE=<now>] - returns
   Date::Manip::Delta object with difference between ticket FIELD value and BASE.
   Retrieves config from ESCALATION_SET. 
-* get_datemanip_worktime - returns Date::Manip::Delta with time which ticket 
+* $Ticket->get_datemanip_worktime - returns Date::Manip::Delta with time which ticket 
   spent in work. Note: if Due was changed manually sometime then result will
   not be correct because it calculates based on current escalation set and 
   contains difference between whole ticket time and remaining time.
