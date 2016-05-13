@@ -386,7 +386,7 @@ sub RT::Ticket::get_datemanip_delta
     my $f = str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC', 
-        Config => get_dm_config_by_eset($eset)
+        Config => get_dm_config_by_eset($eset, $self)
     );
     return (undef)
         unless $f; 
@@ -443,7 +443,7 @@ sub RT::Ticket::get_datemanip_worktime
     my $due_conf_delta = $due_now_delta->new_delta();
     $due_conf_delta->parse($conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr});
 
-    return $due_conf_delta->calc($due_now_delta, 0);
+    return $due_conf_delta->calc($due_now_delta, 1);
 }
 
 1;
