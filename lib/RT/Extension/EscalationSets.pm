@@ -6,6 +6,7 @@ use warnings;
 
 use Exporter 'import';
 our @EXPORT = qw/ str_to_dm  load_config /;
+our $VERSION = '0.2';
 
 ## UNIX timestamp 0:
 use constant NOT_SET => '1970-01-01 00:00:00';

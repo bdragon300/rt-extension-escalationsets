@@ -28,7 +28,6 @@ substitute(
         lib/RT/Extension/EscalationSets/Test.pm
         lib/RT/Extension/EscalationSets/TestFunc.pm
         lib/RT/Extension/EscalationSets/MockTransaction.pm
-        lib/RT/Extension/EscalationSets/Sample_SiteConfig.pm
     ),
 );
 tests 'xt/*.t xt/*/*.t';
