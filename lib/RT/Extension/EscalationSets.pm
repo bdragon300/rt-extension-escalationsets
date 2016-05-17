@@ -13,6 +13,8 @@ use constant NOT_SET => '1970-01-01 00:00:00';
 ## MySQL date time format:
 use constant DATE_FORMAT => '%Y-%m-%d %T';
 
+use Date::Manip::Date;
+
 =head1 NAME
 
 C<RT::Extension::EscalationSets> - Conditional ticket escalation with business hours.
