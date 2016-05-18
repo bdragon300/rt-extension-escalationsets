@@ -26,28 +26,30 @@ our @Scrips = (
     ScripAction             =>  'Notify AdminCcs as Comment',
     Template                =>  'Blank',
     CustomIsApplicableCode  =>  '
-# This Scrip executes when escalation level goes from $from to $to
-# If you want to create scrips for another levels then:
-# * Create new scrip
-# * Copy this code there to "Custom Condition"
-# * Set necessary $from and $to variables value
-# * Select "UserDefined" in Condition
-# * Select necessary "Action" and "Template"
+# lvl_transitions - transitions between levels when scrip can apply
+# Example:
+# my %lvl_transitions = (
+#    0 => [1, 2, 3, "something"],
+#    1 => [2, 3],
+#    2 => [3]
+# );
 
-my $from = "0";
-my $to = "1";
-
-return 0 unless (
-$self->TransactionObj->Type eq "CustomField" 
-&& $self->TransactionObj->ReferenceType eq "RT::ObjectCustomFieldValue" 
-&& $self->TicketObj->LoadCustomFieldByIdentifier(RT->Config->Get("EscalationField"))->id eq $self->TransactionObj->Field
+my %lvl_transitions = (
+    0 => [1, 2, 3],
+    1 => [2, 3],
+    2 => [3]
 );
 
-my $old = ($from eq "" && ! $self->TransactionObj->OldReference);
-$old ||= ($self->TransactionObj->OldReference && $self->TransactionObj->OldReferenceObject->Content eq $from);
-my $new = ($to eq "" && ! $self->TransactionObj->NewReference);
-$new ||= ($self->TransactionObj->NewReference && $self->TransactionObj->NewReferenceObject->Content eq $to);
-$new && $old;
+return 0 unless (
+    $self->TransactionObj->Type eq "CustomField" 
+    && $self->TransactionObj->ReferenceType eq "RT::ObjectCustomFieldValue" 
+    && $self->TicketObj->LoadCustomFieldByIdentifier(RT->Config->Get("EscalationField"))->id eq $self->TransactionObj->Field
+);
+
+my $old_lvl = ($self->TransactionObj->OldReference && $self->TransactionObj->OldReferenceObject->Content) // "";
+my $new_lvl = ($self->TransactionObj->NewReference && $self->TransactionObj->NewReferenceObject->Content) // "";
+exists($lvl_transitions{$old_lvl}) 
+    && grep{ $_ eq $new_lvl } @{$lvl_transitions{$old_lvl}};
 '
 }
 );
