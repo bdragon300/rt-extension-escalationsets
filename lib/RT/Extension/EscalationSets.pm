@@ -231,40 +231,6 @@ sub load_config {
     return \%conf;
 }
 
-=head2 get_current_eset TICKET
-
-Retrieve current ticket escalation set
-
-Receives
-
-=over
-
-=item TICKET - RT::Ticket object
-
-=back
-
-Returns
-
-=over
-
-=item STRING - current escalation set
-
-=item (undef) if error
-
-=back
-
-=cut
-
-sub get_current_eset
-{
-    my $ticket = shift;
-
-    my $config = load_config();
-    my $eset_cf = $config->{'EscalationSetField'};
-    undef $config;
-    return $ticket->FirstCustomFieldValue($eset_cf);
-}
-
 =head2 get_dm_config_by_eset ESET, TICKET
 
 Returns Date::Manip config for escalation set
@@ -274,6 +240,8 @@ Receives
 =over
 
 =item ESET - escalation set. If undef then use current ticket one
+
+=item CONFIG - configuration hashref
 
 =item TICKET - RT::Ticket object
 
@@ -294,10 +262,10 @@ Returns
 sub get_dm_config_by_eset
 {
     my $eset = shift // 'current';
+    my $config = shift;
     my $ticket = shift;
 
-    my $config = load_config();
-    $eset = get_current_eset($ticket)
+    $eset = $ticket->FirstCustomFieldValue($config->{'EscalationSetField'})
         if $eset eq 'current';
     return $config->{$eset}->{'datemanip_config'}
         if exists($config->{$eset});
@@ -339,10 +307,16 @@ sub RT::Ticket::get_datemanip_date
     return (undef) 
         unless $self->_Accessible($field, 'read');
     
+    my $config = load_config();
+    unless ($config) {
+        RT::Logger->error('[RT::Extension::EscalationSets]: Incomplete configuration, see README');
+        return (undef);
+    }
+
     return str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC',
-        Config => get_dm_config_by_eset($eset, $self)
+        Config => get_dm_config_by_eset($eset, $config, $self)
     );
 }
 
@@ -386,10 +360,16 @@ sub RT::Ticket::get_datemanip_delta
     return (undef)
         unless defined($self->_Value($field));
 
+    my $config = load_config();
+    unless ($config) {
+        RT::Logger->error('[RT::Extension::EscalationSets]: Incomplete configuration, see README');
+        return (undef);
+    }
+
     my $f = str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC', 
-        Config => get_dm_config_by_eset($eset, $self)
+        Config => get_dm_config_by_eset($eset, $config, $self)
     );
     return (undef)
         unless $f; 
@@ -427,7 +407,7 @@ sub RT::Ticket::get_datemanip_worktime
         if $self->_Value('Due') eq NOT_SET;
     
     my $conf = load_config();
-    my $eset = get_current_eset($self);
+    my $eset = $self->FirstCustomFieldValue($conf->{'EscalationSetField'});
     
     my $due_date_attr = (keys %{$conf->{'EscalationSets'}->{$eset}->{'due'}})[0]
         if ref($conf->{'EscalationSets'}->{$eset}->{'due'}) eq 'HASH';
