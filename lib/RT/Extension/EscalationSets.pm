@@ -267,8 +267,8 @@ sub get_dm_config_by_eset
 
     $eset = $ticket->FirstCustomFieldValue($config->{'EscalationSetField'})
         if $eset eq 'current';
-    return $config->{$eset}->{'datemanip_config'}
-        if exists($config->{$eset});
+    return $config->{'EscalationSets'}->{$eset}->{'datemanip_config'}
+        if exists($config->{'EscalationSets'}->{$eset});
     return (undef);
 }
 
@@ -357,7 +357,7 @@ sub RT::Ticket::get_datemanip_delta
     my $self = shift;
     my $field = shift;
     my $eset = shift;
-    my $base = shift // str_to_dm(Val => "now", ToTz => "UTC");
+    my $base = shift;
     
     return (undef)
         unless $self->_Accessible($field, 'read');
@@ -370,6 +370,14 @@ sub RT::Ticket::get_datemanip_delta
         return (undef);
     }
 
+    unless ($base) {
+        $base = str_to_dm(
+            Val => "now", 
+            ToTz => "UTC", 
+            Config => get_dm_config_by_eset($eset, $config, $self)
+        );
+    }
+
     my $f = str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC', 
@@ -378,7 +386,7 @@ sub RT::Ticket::get_datemanip_delta
     return (undef)
         unless $f; 
 
-    my $res = $f->calc($base, 1);
+    my $res = $f->calc($base, 1, 'business');
     if ($res->err()) {
         RT::Logger->warning("[RT::Extension::EscalationSets]: get_datemanip_delta: " . $res->err());
     }
@@ -432,7 +440,10 @@ sub RT::Ticket::get_datemanip_worktime
         unless $due_now_delta;
 
     my $due_conf_delta = $due_now_delta->new_delta();
-    $due_conf_delta->parse($conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr});
+    $due_conf_delta->parse(
+        $conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr},
+        $due_now_delta->type('business')
+    );
 
     my $res = $due_conf_delta->calc($due_now_delta, 1);
     if ($res->err()) {
