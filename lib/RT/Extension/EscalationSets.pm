@@ -313,11 +313,15 @@ sub RT::Ticket::get_datemanip_date
         return (undef);
     }
 
-    return str_to_dm(
+    my $res = str_to_dm(
         Val => $self->_Value($field),
         FromTz => 'UTC',
         Config => get_dm_config_by_eset($eset, $config, $self)
     );
+    if ($res->err()) {
+        RT::Logger->warning("[RT::Extension::EscalationSets]: get_datemanip_date: " . $res->err());
+    }
+    return $res;
 }
 
 =head2 RT::Ticket::get_datemanip_delta FIELD, ESET, BASE
@@ -374,7 +378,11 @@ sub RT::Ticket::get_datemanip_delta
     return (undef)
         unless $f; 
 
-    return $f->calc($base, 1);
+    my $res = $f->calc($base, 1);
+    if ($res->err()) {
+        RT::Logger->warning("[RT::Extension::EscalationSets]: get_datemanip_delta: " . $res->err());
+    }
+    return $res;
 }
 
 =head2 RT::Ticket::get_datemanip_worktime
@@ -426,7 +434,11 @@ sub RT::Ticket::get_datemanip_worktime
     my $due_conf_delta = $due_now_delta->new_delta();
     $due_conf_delta->parse($conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr});
 
-    return $due_conf_delta->calc($due_now_delta, 1);
+    my $res = $due_conf_delta->calc($due_now_delta, 1);
+    if ($res->err()) {
+        RT::Logger->warning("[RT::Extension::EscalationSets]: get_datemanip_worktime: " . $res->err());
+    }
+    return $res;
 }
 
 1;
