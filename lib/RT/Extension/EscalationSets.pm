@@ -401,7 +401,13 @@ Note: if Due was changed manually sometime then result will not be correct
 because it calculates based on current escalation set and contains difference
 between whole ticket time and remaining time
 
-Receives: nothing
+Receives:
+
+=over
+
+=item MOMENT - Optional, Date::Manip::Date obj. If undef then use NOW (in UTC)
+
+=back
 
 Returns
 
@@ -418,6 +424,7 @@ Returns
 sub RT::Ticket::get_datemanip_worktime
 {
     my $self = shift;
+    my $moment = shift;
     
     return (undef)
         if $self->_Value('Due') eq NOT_SET;
@@ -435,7 +442,7 @@ sub RT::Ticket::get_datemanip_worktime
         if $self->_Value($due_date_attr) eq NOT_SET;
 
     # return due_conf_delta - (Due - NOW)
-    my $due_now_delta = $self->get_datemanip_delta('Due');
+    my $due_now_delta = $self->get_datemanip_delta('Due', $moment);
     return (undef)
         unless $due_now_delta;
 
