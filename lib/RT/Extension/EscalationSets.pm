@@ -145,7 +145,8 @@ Returns
 
 =cut
 
-sub str_to_dm {
+sub str_to_dm 
+{
     my %args = (
         Val     => undef,
         FromTz  => undef,
@@ -220,7 +221,8 @@ Returns
 
 =cut
 
-sub load_config {
+sub load_config 
+{
 	my %conf = (
 	   EscalationField => RT->Config->Get('EscalationField'),
 	   EscalationSetField => RT->Config->Get('EscalationSetField'),
@@ -230,6 +232,102 @@ sub load_config {
 	return (undef) if ref($conf{'EscalationSets'}) ne 'HASH';
     return \%conf;
 }
+
+=head2 get_worktime_delta
+
+Counts ticket work time based on Due set/unset transactions
+
+Receives
+
+=over
+
+=item TICKET - RT::Ticket
+
+=item STARTDATE - Date::Manip::Date obj. Start date to count worktime
+
+=item NOW - Date::Manip::Date obj. Usually refers to Now moment
+
+=item DM_CONFIG - HASHREF. Date::Manip config
+
+=back
+
+Returns
+
+=over
+
+=item HASHREF config
+
+=item (undef) if error
+
+=back
+
+=cut
+
+sub get_worktime_delta
+{
+    my ($ticket, $startdate, $now, $dm_config) = @_;
+
+    # Check parameters types
+    return (undef)
+        if (ref($startdate) ne 'Date::Manip::Date');
+    return (undef)
+        if (ref($now) ne 'Date::Manip::Date');
+    return (undef)
+        if (defined($dm_config) && ref($dm_config) ne 'HASH');
+
+    my $startdate_str = $startdate->printf(DATE_FORMAT);
+
+    # Search all txns where Due goes from or to unset value
+    my $txns = $ticket->Transactions;
+    $txns->Limit(FIELD => 'Type', VALUE => 'Set');
+    $txns->Limit(FIELD => 'Field', VALUE => 'Due', ENTRYAGGREGATOR => 'AND');
+    $txns->Limit(FIELD => 'NewValue', VALUE => NOT_SET, ENTRYAGGREGATOR => 'AND', SUBCLAUSE => 'val');
+    $txns->Limit(FIELD => 'OldValue', VALUE => NOT_SET, ENTRYAGGREGATOR => 'OR', SUBCLAUSE => 'val');
+    $txns->OrderBy(FIELD => 'id', ORDER => 'ASC');
+
+    my $chunk_start = str_to_dm(
+        Val => $startdate_str,
+        FromTz => 'UTC',
+        Config => $dm_config
+    );
+    my $work_delta = $chunk_start->new_delta();
+    # $work_delta->parse('0:0:0:0:0:0:0', 'business');
+
+    while (my $txn = $txns->Next) {
+        # Skip txn before startdate
+        next
+            if ($txn->Created le $startdate_str);
+
+        # If NOW in past (testing purposes)
+        next
+            if ($txn->Created gt $now->printf(DATE_FORMAT));
+
+        my $txn_created = str_to_dm(Val => $txn->Created, FromTz => 'UTC', Config => $dm_config);
+        if ($txn->NewValue eq NOT_SET) {
+            # Add work chunk to delta
+            $work_delta = $work_delta->calc($txn_created->calc($chunk_start, 1), 0);
+            $chunk_start = undef;
+        }
+        elsif ($txn->OldValue eq NOT_SET
+            && ! defined($chunk_start))
+        {
+            $chunk_start = str_to_dm(Val => $txn->Created, FromTz => 'UTC', Config => $dm_config);
+        }
+        else {
+            # Skip txn
+            # Due was set after startdate without pausing SLA
+            # In this case chunk counts from startdate, not Due set moment
+        }
+    }
+
+    # Due now still set
+    if (defined($chunk_start)) {
+        $work_delta = $work_delta->calc($now->calc($chunk_start, 1), 0);
+    }
+
+    return $work_delta;
+}
+
 
 =head2 get_dm_config_by_eset ESET, TICKET
 
@@ -405,7 +503,7 @@ Receives:
 
 =over
 
-=item MOMENT - Optional, Date::Manip::Date obj. If undef then use NOW (in UTC)
+=item NOW - Optional, Date::Manip::Date obj. If undef the NOW moment will be used
 
 =back
 
@@ -415,8 +513,6 @@ Returns
 
 =item Date::Manip::Delta object
 
-=item (undef) if error
-
 =back
 
 =cut
@@ -424,16 +520,19 @@ Returns
 sub RT::Ticket::get_datemanip_worktime
 {
     my $self = shift;
-    my $moment = shift;
-    
-    return (undef)
-        if $self->_Value('Due') eq NOT_SET;
+    my $now = shift;
     
     my $conf = load_config();
     my $eset = $self->FirstCustomFieldValue($conf->{'EscalationSetField'});
     
     my $due_date_attr = (keys %{$conf->{'EscalationSets'}->{$eset}->{'due'}})[0]
         if ref($conf->{'EscalationSets'}->{$eset}->{'due'}) eq 'HASH';
+
+    # Use this ticket attribute when 'due' was not specified
+    unless ($due_date_attr) {
+        $due_date_attr = 'Started';
+    }
+
     return (undef)
         unless $self->_Accessible($due_date_attr, 'read');
     return (undef)
@@ -441,21 +540,28 @@ sub RT::Ticket::get_datemanip_worktime
     return (undef) 
         if $self->_Value($due_date_attr) eq NOT_SET;
 
-    # return due_conf_delta - (Due - NOW)
-    my $due_now_delta = $self->get_datemanip_delta('Due', $moment);
-    return (undef)
-        unless $due_now_delta;
+    my $startdate = str_to_dm(Val => $self->_Value($due_date_attr), FromTz => 'UTC');
 
-    my $due_conf_delta = $due_now_delta->new_delta();
-    $due_conf_delta->parse(
-        $conf->{'EscalationSets'}->{$eset}->{'due'}->{$due_date_attr},
-        $due_now_delta->type('business')
-    );
+    $now = str_to_dm(Val => 'now', ToTz => 'UTC')
+        unless $now;
 
-    my $res = $due_conf_delta->calc($due_now_delta, 1);
-    if ($res->err()) {
-        RT::Logger->warning("[RT::Extension::EscalationSets]: get_datemanip_worktime: " . $res->err());
+    my $dm_config = $conf->{'EscalationSets'}->{$eset}->{'datemanip_config'};
+
+    my $res = get_worktime_delta($self, $startdate, $now, $dm_config);
+    if ($res && $res->err()) {
+        RT::Logger->warning(
+            "[RT::Extension::EscalationSets]: get_datemanip_worktime: Date::Manip error: " 
+            . $res->err()
+        );
     }
+    elsif ( ! defined($res) ) {
+        RT::Logger->error(
+            "[RT::Extension::EscalationSets]: get_datemanip_worktime: unknown error. "
+            . "Check that NOW parameter is Date::Manip::Date object and "
+            . "'datemanip_config' in configuration for ticket's escalation set (if any)"
+        );
+    }
+
     return $res;
 }
 
