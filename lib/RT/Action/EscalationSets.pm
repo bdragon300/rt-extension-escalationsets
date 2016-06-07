@@ -186,6 +186,8 @@ sub Commit
             $now,
             $ticket
         );
+        RT::Logger->debug("[RT::Extension::EscalationSets]: Due was calculated before possible changing: "
+            . ($new_due ? $new_due->printf(DATE_FORMAT) : 'undef'));
     }
     if ($old_eset ne $new_eset
         && $old_eset ne ''
