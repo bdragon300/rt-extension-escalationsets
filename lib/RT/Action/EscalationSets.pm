@@ -181,7 +181,7 @@ sub Commit
     { # User specified 'due' in config
         $new_due = $self->timeline_due(
             $conf_due{$old_eset} || $conf_due{$new_eset},
-            $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
+            $eset_data{ $conf_due{$old_eset} ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
             $self->get_due_unset_txn($ticket),
             $now,
             $ticket
