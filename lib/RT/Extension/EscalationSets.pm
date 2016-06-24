@@ -18,7 +18,7 @@ use Date::Manip::Date;
 
 =head1 NAME
 
-C<RT::Extension::EscalationSets> - Conditional ticket escalation with business hours.
+C<RT::Extension::EscalationSets> - Highly configurable escalation with business hours.
 
 =head1 DESCRIPTION
 

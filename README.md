@@ -1,6 +1,6 @@
 # Summary
 
-RT::Extension::EscalationSets - Conditional ticket escalation with business hours.
+RT::Extension::EscalationSets - Highly configurable escalation with business hours.
 
 # Description
 
