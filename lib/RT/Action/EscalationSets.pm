@@ -181,11 +181,13 @@ sub Commit
     { # User specified 'due' in config
         $new_due = $self->timeline_due(
             $conf_due{$old_eset} || $conf_due{$new_eset},
-            $eset_data{ ($old_eset ne '') ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
+            $eset_data{ $conf_due{$old_eset} ? $old_eset : $new_eset }->{'datemanip_config'} || undef,
             $self->get_due_unset_txn($ticket),
             $now,
             $ticket
         );
+        RT::Logger->debug("[RT::Extension::EscalationSets]: Due was calculated before possible changing: "
+            . ($new_due ? $new_due->printf(DATE_FORMAT) : 'undef'));
     }
     if ($old_eset ne $new_eset
         && $old_eset ne ''
