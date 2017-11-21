@@ -18,52 +18,38 @@ our @CustomFields = (
 );
 
 
-our @Templates = (
+our @Scrips = (
 {
-	Name        => 'Escalation Email',
-	Description => 'What will be send to email when escalation will occur',
-	Type        => 'Perl',
-	Queue       => 0,
-	Content     => <<'CONTENTS'
-Subject: Escalation #{$Ticket->id} {$EscalationLevel} level
-Content-Type: text/html; charset="UTF-8"
+    Description             =>  'Escalation 0 -> 1',
+    Queue                   =>  0,
+    ScripCondition          =>  'User Defined',
+    ScripAction             =>  'Notify AdminCcs as Comment',
+    Template                =>  'Blank',
+    CustomIsApplicableCode  =>  '
+# lvl_transitions - transitions between levels when scrip can apply
+# Example:
+# my %lvl_transitions = (
+#    0 => [1, 2, 3, "something"],
+#    1 => [2, 3],
+#    2 => [3]
+# );
 
-<p>Ticket <a href="{RT->Config->Get("WebURL")}Ticket/Display.html?id={$Ticket->id}">#{$Ticket->id}</a> was escalated to {$EscalationLevel} level. {
-if ($DeadlineType eq "created") { 
-    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
-}
-elsif ($DeadlineType eq "starts") {
-    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
-} 
-elsif ($DeadlineType eq "due") {
-    $t = $DueInterval->calc($DueDelta);
-    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
-}
-$x}.</p>
-CONTENTS
+my %lvl_transitions = (
+    0 => [1, 2, 3],
+    1 => [2, 3],
+    2 => [3]
+);
 
-},
+return 0 unless (
+    $self->TransactionObj->Type eq "CustomField" 
+    && $self->TransactionObj->ReferenceType eq "RT::ObjectCustomFieldValue" 
+    && $self->TicketObj->LoadCustomFieldByIdentifier(RT->Config->Get("EscalationField"))->id eq $self->TransactionObj->Field
+);
 
-{
-	Name        => 'Escalation Comment',
-	Description => 'What will be left as comment when escalation will occur',
-	Type        => 'Perl',
-	Queue       => 0,
-	Content     => <<'CONTENTS'
-
-Ticket #{$Ticket->id} was escalated to {$EscalationLevel} level. {
-if ($DeadlineType eq "created") { 
-    $x = "Created " . $CreatedDelta->printf("%02hv hours %02mv minutes") . " ago";
-}
-elsif ($DeadlineType eq "starts") {
-    $x = "Starts " . $StartsDelta->printf("%02hv hours %02mv minutes") . " ago";
-} 
-elsif ($DeadlineType eq "due") {
-    $t = $DueInterval->calc($DueDelta);
-    $x = "Worked already " . $t->printf("%02hv hours %02mv minutes");
-}
-$x}.
-CONTENTS
-
+my $old_lvl = ($self->TransactionObj->OldReference && $self->TransactionObj->OldReferenceObject->Content) // "";
+my $new_lvl = ($self->TransactionObj->NewReference && $self->TransactionObj->NewReferenceObject->Content) // "";
+exists($lvl_transitions{$old_lvl}) 
+    && grep{ $_ eq $new_lvl } @{$lvl_transitions{$old_lvl}};
+'
 }
 );

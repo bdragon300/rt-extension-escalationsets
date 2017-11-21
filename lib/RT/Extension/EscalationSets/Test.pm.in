@@ -1,0 +1,26 @@
+use strict;
+use warnings;
+
+package RT::Extension::EscalationSets::Test;
+use base 'RT::Test';
+
+## UNIX timestamp 0:
+use constant NOT_SET => '1970-01-01 00:00:00';
+
+# sub bootstrap_more_config
+# {
+#     my $self = shift;
+#     my $config = shift;
+#     my @conf = grep{ -f $_ } map{ "$_/RT/Extension/EscalationSets/Sample_SiteConfig.pm" } @INC;
+#     die("Cannot find Sample_SiteConfig.pm") unless @conf;
+    
+#     open(my $site_config, '<', $conf[0]);
+
+#     while(<$site_config>) {
+#         print $config $_;
+#     }
+
+#     close $site_config;
+# }
+
+1;
