@@ -3,7 +3,7 @@ use inc::Module::Install;
 RTx 'RT-Extension-EscalationSets';
 license 'perl';
 author 'Igor Derkach <gosha753951@gmail.com>';
-version '0.1';
+version '0.2b';
 
 build_requires('Test::More');
 requires 'Date::Manip' => '6.25';
